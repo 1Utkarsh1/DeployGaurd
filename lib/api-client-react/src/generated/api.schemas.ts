@@ -65,6 +65,24 @@ export type ScanResultSecurityHeaders = { [key: string]: boolean };
  */
 export type ScanResultResponseHeadersSnapshot = { [key: string]: string };
 
+export type MlOverlayResultFeatureImportanceItem = {
+  feature: string;
+  contribution: number;
+};
+
+/**
+ * Deterministic rule-based grade overlay (stub for future ML model)
+ */
+export interface MlOverlayResult {
+  /** "Excellent" | "Good" | "Needs Work" | "Risky" */
+  adjustedGrade: string;
+  /** Model confidence 0-1 */
+  confidence: number;
+  /** Human-readable explanation of the adjusted grade */
+  rationale: string;
+  featureImportance: MlOverlayResultFeatureImportanceItem[];
+}
+
 export interface ScanResult {
   id: number;
   url: string;
@@ -92,6 +110,8 @@ export interface ScanResult {
   htmlHash: string;
   /** Subset of response headers actually received */
   responseHeadersSnapshot: ScanResultResponseHeadersSnapshot;
+  /** CORS posture score 0-10 (10 = no CORS headers or properly scoped) */
+  corsScore: number;
   /** Top 3 findings by points deducted */
   scoreKillers: ScoreKiller[];
   /** Value of the canonical link element, if present */
@@ -100,6 +120,8 @@ export interface ScanResult {
   hasStructuredData: boolean;
   /** Whether a meta robots noindex directive was found */
   hasNoindex: boolean;
+  /** Optional ML/rule-based grade adjustment (absent when not computed) */
+  mlOverlay?: MlOverlayResult;
   createdAt: string;
 }
 

@@ -289,6 +289,9 @@ components:
           additionalProperties:
             type: string
           description: Subset of response headers actually received
+        corsScore:
+          type: number
+          description: CORS posture score 0-10 (10 = no CORS headers or properly scoped)
         scoreKillers:
           type: array
           items:
@@ -304,6 +307,9 @@ components:
         hasNoindex:
           type: boolean
           description: Whether a meta robots noindex directive was found
+        mlOverlay:
+          $ref: "#/components/schemas/MlOverlayResult"
+          description: Optional ML/rule-based grade adjustment (absent when not computed)
         createdAt:
           type: string
       required:
@@ -333,6 +339,7 @@ components:
         - canonicalUrl
         - hasStructuredData
         - hasNoindex
+        - corsScore
         - createdAt
 
     ScanSummary:
@@ -396,6 +403,37 @@ components:
           type: boolean
       required:
         - success
+
+    MlOverlayResult:
+      type: object
+      description: Deterministic rule-based grade overlay (stub for future ML model)
+      properties:
+        adjustedGrade:
+          type: string
+          description: '"Excellent" | "Good" | "Needs Work" | "Risky"'
+        confidence:
+          type: number
+          description: Model confidence 0-1
+        rationale:
+          type: string
+          description: Human-readable explanation of the adjusted grade
+        featureImportance:
+          type: array
+          items:
+            type: object
+            properties:
+              feature:
+                type: string
+              contribution:
+                type: number
+            required:
+              - feature
+              - contribution
+      required:
+        - adjustedGrade
+        - confidence
+        - rationale
+        - featureImportance
 
     ErrorResponse:
       type: object

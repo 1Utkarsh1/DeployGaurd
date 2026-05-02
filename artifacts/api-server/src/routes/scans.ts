@@ -80,6 +80,7 @@ router.post("/scan", scanRateLimiter, async (req, res): Promise<void> => {
       canonicalUrl: result.canonicalUrl ?? null,
       hasStructuredData: result.hasStructuredData,
       hasNoindex: result.hasNoindex,
+      corsScore: result.corsScore,
     })
     .returning();
 

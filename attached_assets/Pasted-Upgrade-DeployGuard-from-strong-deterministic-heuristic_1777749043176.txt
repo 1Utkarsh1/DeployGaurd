@@ -1,0 +1,59 @@
+Upgrade DeployGuard from strong deterministic heuristic analyzer to best-in-industry readiness scoring.
+
+Non-negotiables:
+- Scan only safe GET/HEAD
+- SSRF protections + rate limiting stay
+- deterministic, explainable output
+- include tests for all new analyzers
+
+Add/upgrade analyzers:
+1) CORS analyzer (responds based on response headers)
+- detect ACAO misuse:
+  - Critical if Access-Control-Allow-Credentials: true and ACAO: *
+  - warn if ACAO: * without credentials
+- detect overly broad ACAO values (wildcards, too many origins)
+- detect permissive ACAMethods/ACAH headers
+- add CORS score category (e.g., 0-10) and issue severity mapping
+
+2) Cookie domain/path/privacy scoring (realistic web readiness)
+- parse Set-Cookie with cookie name.
+- score deduct based on:
+  - Secure missing (critical for session-like cookie)
+  - SameSite=None without Secure (critical)
+  - HttpOnly missing (warning)
+  - missing SameSite (warning)
+  - overly broad Domain (warn)
+  - missing or broad Path (warn)
+  - suspiciously long max-age for session-like cookies (warning)
+- compute privacy posture heuristic:
+  - how many cookies set on initial request; penalize many non-essential cookies early
+
+3) Deep CSP penalties
+- penalties for default-src wildcard/data URIs
+- penalize missing object-src 'none'
+- penalize missing frame-ancestors or too permissive
+- maintain script-src unsafe-inline/unsafe-eval detection
+
+4) Optional Headless scan module (feature gate)
+- add a headless mode (with toggle) using Playwright to fetch page with JS enabled
+- collect: render-blocking resources count, total resources request count, basic LCP proxy via DOM metrics, and accessibility via axe-core (if feasible)
+- keep the default mode fast + deterministic; headless mode should not be required
+
+5) Lightweight “ML/LLM overlay” option (design + stub)
+- design a small overlay scoring pipeline (optional) that uses our feature vector (header/cookie/CSP/CORS/perf) and outputs an adjusted “expected expert grade” and “confidence”
+- no external API calls; treat as offline module
+- ship with a stub + clear interface for later training; deterministic score remains primary
+
+Tests:
+- add tests for analyzeCors, cookie scope heuristics, deep CSP penalties
+- add tests for headless toggle logic (enabled/disabled)
+
+Evaluate after changes:
+- github.com
+- news.ycombinator.com
+- wikipedia.org
+Report scores + top 3 score killers for each.
+
+Then return summary and list next frontier improvements like dependency vulnerability scanning, third-party governance, and structured-data correctness.
+
+Start now.

@@ -66,6 +66,11 @@ export const CreateScanResponse = zod.object({
   responseHeadersSnapshot: zod
     .record(zod.string(), zod.string())
     .describe("Subset of response headers actually received"),
+  corsScore: zod
+    .number()
+    .describe(
+      "CORS posture score 0-10 (10 = no CORS headers or properly scoped)",
+    ),
   scoreKillers: zod
     .array(
       zod
@@ -87,6 +92,26 @@ export const CreateScanResponse = zod.object({
   hasNoindex: zod
     .boolean()
     .describe("Whether a meta robots noindex directive was found"),
+  mlOverlay: zod
+    .object({
+      adjustedGrade: zod
+        .string()
+        .describe('\"Excellent\" | \"Good\" | \"Needs Work\" | \"Risky\"'),
+      confidence: zod.number().describe("Model confidence 0-1"),
+      rationale: zod
+        .string()
+        .describe("Human-readable explanation of the adjusted grade"),
+      featureImportance: zod.array(
+        zod.object({
+          feature: zod.string(),
+          contribution: zod.number(),
+        }),
+      ),
+    })
+    .optional()
+    .describe(
+      "Optional ML\/rule-based grade adjustment (absent when not computed)",
+    ),
   createdAt: zod.string(),
 });
 
@@ -165,6 +190,11 @@ export const GetScanResponse = zod.object({
   responseHeadersSnapshot: zod
     .record(zod.string(), zod.string())
     .describe("Subset of response headers actually received"),
+  corsScore: zod
+    .number()
+    .describe(
+      "CORS posture score 0-10 (10 = no CORS headers or properly scoped)",
+    ),
   scoreKillers: zod
     .array(
       zod
@@ -186,6 +216,26 @@ export const GetScanResponse = zod.object({
   hasNoindex: zod
     .boolean()
     .describe("Whether a meta robots noindex directive was found"),
+  mlOverlay: zod
+    .object({
+      adjustedGrade: zod
+        .string()
+        .describe('\"Excellent\" | \"Good\" | \"Needs Work\" | \"Risky\"'),
+      confidence: zod.number().describe("Model confidence 0-1"),
+      rationale: zod
+        .string()
+        .describe("Human-readable explanation of the adjusted grade"),
+      featureImportance: zod.array(
+        zod.object({
+          feature: zod.string(),
+          contribution: zod.number(),
+        }),
+      ),
+    })
+    .optional()
+    .describe(
+      "Optional ML\/rule-based grade adjustment (absent when not computed)",
+    ),
   createdAt: zod.string(),
 });
 

@@ -56,6 +56,7 @@ export const scansTable = pgTable("scans", {
   canonicalUrl: text("canonical_url"),
   hasStructuredData: boolean("has_structured_data").notNull().default(false),
   hasNoindex: boolean("has_noindex").notNull().default(false),
+  corsScore: real("cors_score").notNull().default(10),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

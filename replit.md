@@ -16,7 +16,7 @@ DeployGuard is a launch-readiness dashboard that scans any public URL and return
 - **API codegen**: Orval (contract-first, from OpenAPI spec)
 - **HTML parsing**: `node-html-parser`
 - **Rate limiting**: `express-rate-limit`
-- **Testing**: Vitest (105 unit tests in `artifacts/api-server/src/lib/scanner.test.ts`)
+- **Testing**: Vitest (117 unit tests in `artifacts/api-server/src/lib/scanner.test.ts`)
 
 ## Architecture
 
@@ -31,17 +31,20 @@ lib/
   db/             — Drizzle ORM schema + migrations
 ```
 
-## Scoring Rubric (v2 — 100 pts total)
+## Scoring Rubric (v3 — 100 pts total)
 
 | Category | Max | Key Checks |
 |---|---|---|
 | HTTPS & Redirects | 10 | HTTPS usage (8), clean redirect chain ≤2 hops (2) |
-| Security Headers | 35 | CSP quality (12), HSTS quality (9), X-Frame-Options (4), Referrer-Policy (4), Permissions-Policy (4), COOP/COEP/CORP (2) |
-| Cookies & Session | 20 | Per-cookie: Secure (-6), HttpOnly (-3), SameSite (-2), SameSite=None without Secure (-5), overly-broad domain (-2), very long Max-Age (-1) |
-| Cache & Exposure | 10 | Server header version leak (-1), X-Powered-By (-1), CORS wildcard (-3/-4), cache hygiene for cookie-bearing pages (-1), API docs exposed (-2) |
+| Security Headers | 30 | CSP quality (12), HSTS quality (9), X-Frame-Options (4), Referrer-Policy (2), Permissions-Policy (2), COOP/COEP/CORP (1) |
+| Cookies & Session | 15 | Per-cookie: Secure (-6), HttpOnly (-3), SameSite (-2), SameSite=None without Secure (-5), overly-broad domain (-2), very long Max-Age (-1); privacy posture: >3 cookies on first load (-1 per extra, max -3) |
+| **CORS** | **10** | No CORS headers = 10/10; ACAO: * = 6/10 (warn); ACAO: * + credentials = 2/10 (critical); permissive methods w/ wildcard (-2); sensitive headers w/ wildcard (-1); specific origin = 10/10 |
+| Cache & Exposure | 7 | Server header version leak (-1), X-Powered-By (-1), cache hygiene for cookie-bearing pages (-1), API docs exposed (-2) |
 | Performance | 15 | penaltyCurve curves: response time (free <300ms, max 5pts at 2s), HTML size (free <250KB, max 5pts at 2MB), script count (free <10, max 5pts at 60) |
 | SEO | 7 | Title quality (3), meta description (1.5), viewport (0.5), canonical (0.5), noindex penalty (−0.5), robots.txt (0.5), sitemap (0.5) |
-| Accessibility | 3 | Inputs with accessible labels (1), images with alt (1), main landmark + headings (1) |
+| Accessibility | 6 | Inputs with accessible labels (2), images with alt (2), main landmark + headings (1), html lang attribute (1) |
+
+**Total: 10+30+15+10+7+15+7+6 = 100**
 
 Grades: **Excellent** (≥85) / **Good** (≥70) / **Needs Work** (≥50) / **Risky** (<50)
 
@@ -50,14 +53,23 @@ Grades: **Excellent** (≥85) / **Good** (≥70) / **Needs Work** (≥50) / **Ri
 - `parseCspDirectives(csp)` — parses CSP string into directive→tokens Map
 - `analyzeCsp(csp)` — quality-scores CSP 0-12 with per-weakness penalties
 - `analyzeHsts(hsts, usesHttps)` — quality-scores HSTS 0-9 (max-age, includeSubDomains, preload)
-- `analyzeCors(allowOrigin, allowCreds)` — detects wildcard CORS and credential misconfig
+- `analyzeCors(allowOrigin, allowCreds, allowMethods?, allowHeaders?)` — scores CORS posture 0-10 (10 = no CORS or properly scoped)
 - `parseSetCookieHeaders(lines[])` — parses Set-Cookie header lines into ParsedCookie objects
 - `penaltyCurve(value, freeThreshold, maxPenalty, fullPenaltyAt)` — linear penalty interpolation
+- `headlessScan(url)` — feature-gated headless browser scan stub (returns null unless HEADLESS_SCAN=true)
 - `normalizeUrl`, `isPrivateIp`, `validateSsrfSync` — SSRF protection primitives
+
+## ML Overlay (`artifacts/api-server/src/lib/ml-overlay.ts`)
+
+Deterministic rule-based "expert grade" overlay — a stub for future model training:
+- `buildFeatureVector(params)` — builds a FeatureVector from scan result fields
+- `computeMlOverlay(features)` — returns MlOverlayResult with adjustedGrade, confidence (0-1), rationale, featureImportance[]
+- Hard downgrades: no HTTPS → Risky (0.97 confidence); critical CORS + otherwise Good → Needs Work
+- No external API calls; fully offline and deterministic
 
 ## Score Killers
 
-Every scan returns `scoreKillers[]` — top 3 findings sorted by `pointsLost` descending. These are displayed prominently in the UI between the score card and the category breakdown, as labeled numbered items with the category and points lost.
+Every scan returns `scoreKillers[]` — top 3 findings sorted by `pointsLost` descending. Displayed prominently in the UI between the score card and the category breakdown.
 
 ## Security & Production Hardening
 
@@ -87,8 +99,9 @@ Every scan returns `scoreKillers[]` — top 3 findings sorted by `pointsLost` de
 ## Evidence Fields
 
 Every scan response includes:
+- `corsScore`: CORS posture 0-10 (standalone field + in categoryScores)
 - `htmlHash`: first 16 hex chars of SHA-256 of the fetched HTML body
-- `responseHeadersSnapshot`: subset of response headers actually received
+- `responseHeadersSnapshot`: subset of response headers actually received (now includes CORS headers)
 - `scoreKillers`: top 3 findings by points lost
 - `canonicalUrl`: canonical link element value (for SEO evidence)
 - `hasStructuredData`: whether JSON-LD was detected
@@ -100,7 +113,7 @@ Every scan response includes:
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run test` — run the 105-test scanner unit test suite
+- `pnpm --filter @workspace/api-server run test` — run the 117-test scanner unit test suite
 
 ## API Endpoints
 
@@ -116,4 +129,5 @@ Every scan response includes:
 
 Single table: `scans` — stores all scan results including JSONB columns for flexible data.
 
-Columns added in v2 upgrade: `score_killers JSONB`, `canonical_url TEXT`, `has_structured_data BOOLEAN`, `has_noindex BOOLEAN`.
+Columns added in v2: `score_killers JSONB`, `canonical_url TEXT`, `has_structured_data BOOLEAN`, `has_noindex BOOLEAN`.
+Columns added in v3: `cors_score REAL` (default 10).

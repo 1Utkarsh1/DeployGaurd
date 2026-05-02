@@ -9,7 +9,9 @@ import {
   analyzeCors,
   parseSetCookieHeaders,
   penaltyCurve,
+  headlessScan,
 } from "./scanner.js";
+import { computeMlOverlay, buildFeatureVector } from "./ml-overlay.js";
 
 // ============================================================
 // normalizeUrl
@@ -317,39 +319,66 @@ describe("analyzeHsts", () => {
 // ============================================================
 
 describe("analyzeCors", () => {
-  it("returns no issues when no CORS headers are present", () => {
+  it("returns score 10 and a passed issue when no CORS headers are present", () => {
     const r = analyzeCors(null, null);
-    expect(r.issues).toHaveLength(0);
-    expect(r.pointsLost).toBe(0);
-  });
-
-  it("warns and deducts 3 pts for wildcard origin without credentials", () => {
-    const r = analyzeCors("*", null);
-    expect(r.pointsLost).toBe(3);
-    expect(r.issues.some((i) => i.severity === "warning")).toBe(true);
-  });
-
-  it("warns and deducts 3 pts for wildcard + credentials=false", () => {
-    const r = analyzeCors("*", "false");
-    expect(r.pointsLost).toBe(3);
-  });
-
-  it("critical: wildcard origin + credentials=true is a dangerous misconfiguration", () => {
-    const r = analyzeCors("*", "true");
-    expect(r.pointsLost).toBe(4);
-    expect(r.issues.some((i) => i.severity === "critical")).toBe(true);
-  });
-
-  it("no penalty for specific origin with credentials", () => {
-    const r = analyzeCors("https://app.example.com", "true");
-    expect(r.pointsLost).toBe(0);
+    expect(r.score).toBe(10);
+    expect(r.severity).toBe("none");
     expect(r.issues.some((i) => i.severity === "passed")).toBe(true);
   });
 
-  it("no issues for specific origin without credentials", () => {
+  it("deducts 4 pts (score 6) for wildcard origin without credentials", () => {
+    const r = analyzeCors("*", null);
+    expect(r.score).toBe(6);
+    expect(r.severity).toBe("warn");
+    expect(r.issues.some((i) => i.severity === "warning")).toBe(true);
+  });
+
+  it("deducts 4 pts (score 6) for wildcard + credentials=false", () => {
+    const r = analyzeCors("*", "false");
+    expect(r.score).toBe(6);
+    expect(r.severity).toBe("warn");
+  });
+
+  it("critical: wildcard + credentials=true → score 2", () => {
+    const r = analyzeCors("*", "true");
+    expect(r.score).toBe(2);
+    expect(r.severity).toBe("critical");
+    expect(r.issues.some((i) => i.severity === "critical")).toBe(true);
+  });
+
+  it("no penalty for specific origin with credentials → score 10", () => {
+    const r = analyzeCors("https://app.example.com", "true");
+    expect(r.score).toBe(10);
+    expect(r.issues.some((i) => i.severity === "passed")).toBe(true);
+  });
+
+  it("score 10 for specific origin without credentials", () => {
     const r = analyzeCors("https://partner.example.com", null);
-    expect(r.issues).toHaveLength(0);
-    expect(r.pointsLost).toBe(0);
+    expect(r.score).toBe(10);
+  });
+
+  it("additional -2 for permissive methods (DELETE/PUT/PATCH) with wildcard origin", () => {
+    const r = analyzeCors("*", null, "GET, POST, DELETE, PUT");
+    expect(r.score).toBeLessThanOrEqual(4);
+    expect(r.penalties.length).toBeGreaterThan(1);
+    expect(r.issues.some((i) => i.message.toLowerCase().includes("method"))).toBe(true);
+  });
+
+  it("no extra penalty for permissive methods when origin is specific", () => {
+    const r = analyzeCors("https://api.example.com", null, "GET, POST, DELETE");
+    expect(r.score).toBe(10);
+  });
+
+  it("additional -1 for Authorization header in ACAH with wildcard origin", () => {
+    const r = analyzeCors("*", null, null, "Authorization, Content-Type");
+    expect(r.score).toBeLessThanOrEqual(5);
+    expect(r.issues.some((i) => i.message.toLowerCase().includes("header"))).toBe(true);
+  });
+
+  it("clamps score to 0 minimum for multiple stacked deductions", () => {
+    const r = analyzeCors("*", "true", "GET, DELETE, PUT", "Authorization");
+    expect(r.score).toBeGreaterThanOrEqual(0);
+    expect(r.severity).toBe("critical");
   });
 });
 
@@ -489,5 +518,111 @@ describe("penaltyCurve", () => {
 
   it("handles freeThreshold === fullPenaltyAt edge case without throwing", () => {
     expect(() => penaltyCurve(500, 500, 5, 500)).not.toThrow();
+  });
+});
+
+// ============================================================
+// headlessScan — feature gate (HEADLESS_SCAN env)
+// ============================================================
+
+describe("headlessScan", () => {
+  it("returns null when HEADLESS_SCAN is not set (default off)", async () => {
+    delete process.env.HEADLESS_SCAN;
+    const result = await headlessScan("https://example.com");
+    expect(result).toBeNull();
+  });
+
+  it("returns a HeadlessResult stub (not null) when HEADLESS_SCAN=true", async () => {
+    process.env.HEADLESS_SCAN = "true";
+    const result = await headlessScan("https://example.com");
+    expect(result).not.toBeNull();
+    expect(result?.available).toBe(false);
+    expect(result?.error).toBeDefined();
+    delete process.env.HEADLESS_SCAN;
+  });
+});
+
+// ============================================================
+// ML Overlay — deterministic rule-based stub
+// ============================================================
+
+describe("computeMlOverlay", () => {
+  const baseFeatures = () =>
+    buildFeatureVector({
+      httpsScore: 10,
+      securityScore: 28,
+      corsScore: 10,
+      cookieScore: 15,
+      cacheScore: 7,
+      perfScore: 14,
+      seoScore: 6,
+      a11yScore: 5,
+      totalScore: 95,
+      issues: [],
+      cookieCount: 0,
+      hasCSP: true,
+      hasHSTS: true,
+      usesHttps: true,
+      hasCriticalCors: false,
+      hasNoindex: false,
+    });
+
+  it("returns a valid MlOverlayResult", () => {
+    const result = computeMlOverlay(baseFeatures());
+    expect(result.adjustedGrade).toBeDefined();
+    expect(typeof result.confidence).toBe("number");
+    expect(result.confidence).toBeGreaterThan(0);
+    expect(result.confidence).toBeLessThanOrEqual(1);
+    expect(result.rationale).toBeTruthy();
+    expect(Array.isArray(result.featureImportance)).toBe(true);
+  });
+
+  it("rates a near-perfect site as Excellent with high confidence", () => {
+    const result = computeMlOverlay(baseFeatures());
+    expect(result.adjustedGrade).toBe("Excellent");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it("hard-downgrades to Risky when usesHttps is false regardless of score", () => {
+    const features = buildFeatureVector({
+      ...baseFeatures(),
+      usesHttps: false,
+      httpsScore: 0,
+      totalScore: 65,
+      issues: [{ severity: "critical", category: "HTTPS & Redirects" }],
+    });
+    const result = computeMlOverlay(features);
+    expect(result.adjustedGrade).toBe("Risky");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("downgrades to Needs Work when critical CORS misconfiguration is present", () => {
+    const features = buildFeatureVector({
+      ...baseFeatures(),
+      hasCriticalCors: true,
+      corsScore: 2,
+      totalScore: 88,
+      issues: [{ severity: "critical", category: "CORS" }],
+    });
+    const result = computeMlOverlay(features);
+    expect(result.adjustedGrade).not.toBe("Excellent");
+  });
+
+  it("feature importance list has at most 5 entries", () => {
+    const result = computeMlOverlay(baseFeatures());
+    expect(result.featureImportance.length).toBeLessThanOrEqual(5);
+  });
+
+  it("buildFeatureVector maps criticalCount correctly", () => {
+    const features = buildFeatureVector({
+      ...baseFeatures(),
+      issues: [
+        { severity: "critical", category: "Security Headers" },
+        { severity: "critical", category: "CORS" },
+        { severity: "warning", category: "Cache & Exposure" },
+      ],
+    });
+    expect(features.criticalCount).toBe(2);
+    expect(features.warningCount).toBe(1);
   });
 });

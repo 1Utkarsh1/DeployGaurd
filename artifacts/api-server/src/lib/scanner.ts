@@ -55,6 +55,9 @@ const EVIDENCE_HEADERS = [
   "cross-origin-resource-policy",
   "x-content-type-options",
   "access-control-allow-origin",
+  "access-control-allow-credentials",
+  "access-control-allow-methods",
+  "access-control-allow-headers",
   "content-type",
   "server",
   "x-powered-by",
@@ -116,6 +119,7 @@ export interface ScanResult {
   fixPrompt: string;
   htmlHash: string;
   responseHeadersSnapshot: Record<string, string>;
+  corsScore: number;
   scoreKillers: Array<{ category: string; message: string; pointsLost: number }>;
   canonicalUrl: string | null;
   hasStructuredData: boolean;
@@ -587,63 +591,130 @@ export function analyzeHsts(hstsValue: string | null, usesHttps: boolean): HstsA
   return { score: Math.max(0, score), issues, penalties };
 }
 
+export type CorsSeverity = "none" | "info" | "warn" | "critical";
+
 export interface CorsAnalysis {
+  score: number;
+  severity: CorsSeverity;
   issues: Issue[];
   penalties: Penalty[];
-  pointsLost: number;
 }
 
 /**
- * Analyzes CORS headers for permissive configuration.
+ * Scores CORS configuration 0-10. Full 10 when no CORS headers are set.
  * Exported for unit tests.
+ *
+ * @param allowOrigin   Access-Control-Allow-Origin value
+ * @param allowCredentials Access-Control-Allow-Credentials value
+ * @param allowMethods  Access-Control-Allow-Methods value (optional)
+ * @param allowHeaders  Access-Control-Allow-Headers value (optional)
  */
 export function analyzeCors(
   allowOrigin: string | null,
   allowCredentials: string | null,
+  allowMethods?: string | null,
+  allowHeaders?: string | null,
 ): CorsAnalysis {
   const issues: Issue[] = [];
   const penalties: Penalty[] = [];
-  const CAT = "Cache & Exposure";
-  let pointsLost = 0;
+  const CAT = "CORS";
+  let score = 10;
+  let severity: CorsSeverity = "none";
 
-  if (!allowOrigin) return { issues, penalties, pointsLost: 0 };
+  if (!allowOrigin) {
+    issues.push({
+      category: CAT,
+      severity: "passed",
+      message: "No CORS headers — cross-origin access not enabled",
+      explanation: "This endpoint does not serve CORS headers. Cross-origin access is restricted by default.",
+      suggestion: "If a public API, add explicit CORS headers. If HTML page, this is expected.",
+    });
+    return { score: 10, severity: "none", issues, penalties };
+  }
 
   const credentialsEnabled = allowCredentials?.toLowerCase() === "true";
+  const isWildcard = allowOrigin.trim() === "*";
 
-  if (allowOrigin === "*" && credentialsEnabled) {
-    pointsLost = 4;
-    penalties.push({ category: CAT, message: "CORS wildcard origin with credentials=true (misconfigured)", pointsLost });
+  if (isWildcard && credentialsEnabled) {
+    score -= 8;
+    severity = "critical";
+    penalties.push({ category: CAT, message: "CORS wildcard origin combined with credentials=true (critical misconfiguration)", pointsLost: 8 });
     issues.push({
       category: CAT,
       severity: "critical",
-      message: "CORS: wildcard origin combined with credentials=true (dangerous misconfiguration)",
+      message: "CORS: Access-Control-Allow-Origin: * combined with Allow-Credentials: true",
       explanation:
-        "Browsers reject ACAO: * + credentials but this config signals a server that may be permissively misconfigured. Exploitable with non-browser HTTP clients.",
+        "Browsers block ACAO: * with credentials, but this config shows the server is permissively misconfigured. Non-browser HTTP clients can exploit this to read authenticated responses from any origin.",
       suggestion:
-        "Never combine ACAO: * with credentials. Set a specific trusted origin when using credentials.",
+        "Never combine ACAO: * with credentials. Set an explicit trusted origin list when using Allow-Credentials: true.",
     });
-  } else if (allowOrigin === "*") {
-    pointsLost = 3;
-    penalties.push({ category: CAT, message: "CORS Access-Control-Allow-Origin: * (allows any origin)", pointsLost });
+  } else if (isWildcard) {
+    score -= 4;
+    severity = "warn";
+    penalties.push({ category: CAT, message: "CORS Access-Control-Allow-Origin: * (any origin can read responses)", pointsLost: 4 });
     issues.push({
       category: CAT,
       severity: "warning",
       message: "CORS allows all origins (Access-Control-Allow-Origin: *)",
       explanation:
-        "Any website can read your API responses. Acceptable for public read-only APIs, dangerous for authenticated endpoints.",
-      suggestion: "Restrict CORS to specific trusted origins unless this is a fully public API.",
+        "Any website can read this endpoint's responses. Acceptable for fully public read-only APIs, but dangerous if this endpoint serves sensitive data or is behind authentication.",
+      suggestion: "Restrict CORS to specific trusted origins unless this endpoint intentionally serves public data.",
     });
   } else if (credentialsEnabled) {
     issues.push({
       category: CAT,
       severity: "passed",
-      message: `CORS credentials properly scoped to ${allowOrigin}`,
-      explanation: "Credentialed CORS is correctly restricted to a specific origin.",
-      suggestion: "Ensure the allowed origin is intentionally trusted.",
+      message: `CORS credentials scoped to specific origin: ${allowOrigin}`,
+      explanation: "Credentialed CORS is correctly restricted to a specific trusted origin.",
+      suggestion: "Ensure the allowed origin is intentionally trusted and review periodically.",
+    });
+  } else {
+    issues.push({
+      category: CAT,
+      severity: "passed",
+      message: `CORS restricted to specific origin: ${allowOrigin}`,
+      explanation: "CORS is appropriately scoped to a specific origin.",
+      suggestion: "Verify the origin list is minimal — include only what you need.",
     });
   }
 
-  return { issues, penalties, pointsLost };
+  if (isWildcard && allowMethods) {
+    const upper = allowMethods.toUpperCase();
+    const dangerousMethods = ["DELETE", "PUT", "PATCH"];
+    const found = dangerousMethods.filter((m) => upper.includes(m));
+    if (found.length > 0) {
+      score -= 2;
+      if (severity === "none") severity = "warn";
+      penalties.push({ category: CAT, message: `CORS allows ${found.join("/")} from wildcard origin`, pointsLost: 2 });
+      issues.push({
+        category: CAT,
+        severity: "warning",
+        message: `CORS wildcard origin allows state-changing methods: ${found.join(", ")}`,
+        explanation: `Allowing ${found.join("/")} cross-origin from any origin (ACAO: *) enables any website to modify your resources.`,
+        suggestion: "Restrict mutating HTTP methods (DELETE, PUT, PATCH) to specific trusted origins.",
+      });
+    }
+  }
+
+  if (isWildcard && allowHeaders) {
+    const lower = allowHeaders.toLowerCase();
+    const sensitiveHeaders = ["authorization", "cookie", "x-auth-token", "x-api-key"];
+    const found = sensitiveHeaders.filter((h) => lower.includes(h));
+    if (found.length > 0) {
+      score -= 1;
+      if (severity === "none") severity = "warn";
+      penalties.push({ category: CAT, message: `CORS allows sensitive request headers from wildcard origin`, pointsLost: 1 });
+      issues.push({
+        category: CAT,
+        severity: "warning",
+        message: `CORS allows sensitive headers (${found.join(", ")}) from any origin`,
+        explanation: "Allowing authentication headers in CORS requests from a wildcard origin enables credential forwarding from any website.",
+        suggestion: "Restrict CORS to specific origins whenever authentication headers are involved.",
+      });
+    }
+  }
+
+  return { score: Math.max(0, score), severity, issues, penalties };
 }
 
 /**
@@ -751,7 +822,7 @@ function scoreReferrerPolicy(value: string | null): { score: number; issues: Iss
   const penalties: Penalty[] = [];
   const CAT = "Security Headers";
   if (!value) {
-    penalties.push({ category: CAT, message: "Missing Referrer-Policy", pointsLost: 4 });
+    penalties.push({ category: CAT, message: "Missing Referrer-Policy", pointsLost: 2 });
     issues.push({
       category: CAT,
       severity: "warning",
@@ -766,7 +837,7 @@ function scoreReferrerPolicy(value: string | null): { score: number; issues: Iss
   const STRONG = new Set(["no-referrer", "strict-origin", "strict-origin-when-cross-origin", "same-origin", "origin"]);
   const WEAK = new Set(["unsafe-url", "no-referrer-when-downgrade", ""]);
   if (WEAK.has(lower)) {
-    penalties.push({ category: CAT, message: `Referrer-Policy "${lower}" leaks full URL cross-origin`, pointsLost: 2 });
+    penalties.push({ category: CAT, message: `Referrer-Policy "${lower}" leaks full URL cross-origin`, pointsLost: 1 });
     issues.push({
       category: CAT,
       severity: "warning",
@@ -774,7 +845,7 @@ function scoreReferrerPolicy(value: string | null): { score: number; issues: Iss
       explanation: `"${lower}" sends the full URL including path and query string on cross-origin requests, potentially exposing tokens or PII.`,
       suggestion: "Use Referrer-Policy: strict-origin-when-cross-origin (OWASP recommended default).",
     });
-    return { score: 2, issues, penalties };
+    return { score: 1, issues, penalties };
   }
   if (STRONG.has(lower)) {
     issues.push({
@@ -784,7 +855,7 @@ function scoreReferrerPolicy(value: string | null): { score: number; issues: Iss
       explanation: "Referrer-Policy is set to a privacy-preserving value.",
       suggestion: "strict-origin-when-cross-origin is the recommended default.",
     });
-    return { score: 4, issues, penalties };
+    return { score: 2, issues, penalties };
   }
   issues.push({
     category: CAT,
@@ -793,7 +864,7 @@ function scoreReferrerPolicy(value: string | null): { score: number; issues: Iss
     explanation: "Referrer-Policy is present. Verify this value meets your privacy requirements.",
     suggestion: "Consider strict-origin-when-cross-origin for the best balance.",
   });
-  return { score: 3, issues, penalties };
+  return { score: 1.5, issues, penalties };
 }
 
 function scorePermissionsPolicy(value: string | null): { score: number; issues: Issue[]; penalties: Penalty[] } {
@@ -801,7 +872,7 @@ function scorePermissionsPolicy(value: string | null): { score: number; issues: 
   const penalties: Penalty[] = [];
   const CAT = "Security Headers";
   if (!value) {
-    penalties.push({ category: CAT, message: "Missing Permissions-Policy", pointsLost: 4 });
+    penalties.push({ category: CAT, message: "Missing Permissions-Policy", pointsLost: 2 });
     issues.push({
       category: CAT,
       severity: "warning",
@@ -819,7 +890,7 @@ function scorePermissionsPolicy(value: string | null): { score: number; issues: 
     explanation: "Browser feature access is explicitly controlled.",
     suggestion: "Review values — ensure camera=(), microphone=(), geolocation=() and payment=() are restricted.",
   });
-  return { score: 4, issues, penalties };
+  return { score: 2, issues, penalties };
 }
 
 function scoreCoopCoepCorp(headers: Headers): { score: number; issues: Issue[]; penalties: Penalty[] } {
@@ -829,15 +900,15 @@ function scoreCoopCoepCorp(headers: Headers): { score: number; issues: Issue[]; 
   let score = 0;
 
   const checks = [
-    { key: "cross-origin-opener-policy", name: "COOP", pts: 0.7,
+    { key: "cross-origin-opener-policy", name: "COOP", pts: 0.4,
       passExplanation: "COOP isolates your browsing context, protecting against cross-origin window attacks.",
       failExplanation: "Without COOP, malicious cross-origin popups can maintain a reference to your window.",
       suggestion: "Add Cross-Origin-Opener-Policy: same-origin" },
-    { key: "cross-origin-embedder-policy", name: "COEP", pts: 0.7,
+    { key: "cross-origin-embedder-policy", name: "COEP", pts: 0.4,
       passExplanation: "COEP ensures all sub-resources use CORS/CORP, enabling secure cross-origin isolation.",
       failExplanation: "COEP is required for SharedArrayBuffer and precise timers.",
       suggestion: "Add Cross-Origin-Embedder-Policy: require-corp" },
-    { key: "cross-origin-resource-policy", name: "CORP", pts: 0.6,
+    { key: "cross-origin-resource-policy", name: "CORP", pts: 0.2,
       passExplanation: "CORP prevents other origins from loading this resource, mitigating Spectre-type attacks.",
       failExplanation: "Without CORP, your resources can be loaded by any origin via side-channel attacks.",
       suggestion: "Add Cross-Origin-Resource-Policy: same-origin" },
@@ -877,10 +948,24 @@ function scoreCookies(
       explanation: "No Set-Cookie headers were found in the response.",
       suggestion: "When you add cookies, set Secure, HttpOnly, and SameSite=Lax on all of them.",
     });
-    return { score: 20, issues, penalties, cookieIssueStrings };
+    return { score: 15, issues, penalties, cookieIssueStrings };
   }
 
   let deduction = 0;
+
+  // Privacy posture: penalize many cookies on first load (3 or fewer is the free threshold)
+  const COOKIE_FREE_THRESHOLD = 3;
+  if (cookies.length > COOKIE_FREE_THRESHOLD) {
+    const extra = cookies.length - COOKIE_FREE_THRESHOLD;
+    const pts = Math.min(3, extra);
+    deduction += pts;
+    penalties.push({ category: CAT, message: `${cookies.length} cookies set on initial load (${extra} above privacy threshold)`, pointsLost: pts });
+    cookieIssueStrings.push(`${cookies.length} cookies set on initial page load — consider deferring non-essential cookies`);
+    issues.push({ category: CAT, severity: "warning",
+      message: `${cookies.length} cookies set on initial page load`,
+      explanation: `Setting ${cookies.length} cookies on first load increases tracking surface. GDPR/CCPA may require consent before non-essential cookies.`,
+      suggestion: "Defer analytics/marketing cookies until user consent. Limit initial load to strictly necessary cookies." });
+  }
   let finalHost = "";
   try { finalHost = new URL(finalUrl).hostname; } catch { /* ignore */ }
 
@@ -968,7 +1053,7 @@ function scoreCookies(
     }
   }
 
-  return { score: Math.max(0, 20 - deduction), issues, penalties, cookieIssueStrings };
+  return { score: Math.max(0, 15 - deduction), issues, penalties, cookieIssueStrings };
 }
 
 function scoreCacheHygiene(
@@ -979,7 +1064,7 @@ function scoreCacheHygiene(
   const issues: Issue[] = [];
   const penalties: Penalty[] = [];
   const CAT = "Cache & Exposure";
-  let score = 10;
+  let score = 7;
 
   const server = headers.get("server");
   const xPoweredBy = headers.get("x-powered-by");
@@ -1010,13 +1095,6 @@ function scoreCacheHygiene(
       explanation: "X-Powered-By tells attackers which framework or language you use, enabling targeted exploits.",
       suggestion: "Remove X-Powered-By. In Express: app.disable('x-powered-by'). In PHP: expose_php = Off in php.ini." });
   }
-
-  const allowOrigin = headers.get("access-control-allow-origin");
-  const allowCreds = headers.get("access-control-allow-credentials");
-  const corsResult = analyzeCors(allowOrigin, allowCreds);
-  score -= corsResult.pointsLost;
-  issues.push(...corsResult.issues);
-  penalties.push(...corsResult.penalties);
 
   if (hasCookies) {
     if (!cacheControl) {
@@ -1343,9 +1421,9 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
   const issues: Issue[] = [];
   const penalties: Penalty[] = [];
   const CAT = "Accessibility";
-  let score = 3;
+  let score = 6;
 
-  // Inputs without accessible labels
+  // Inputs without accessible labels (2pts)
   const inputs = root.querySelectorAll(
     'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="reset"])',
   );
@@ -1362,8 +1440,8 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
       return !aria && parentTag !== "label" && !(id && labelledIds.has(id));
     });
     if (unlabelled.length > 0) {
-      score -= 1;
-      penalties.push({ category: CAT, message: `${unlabelled.length} input(s) without accessible labels`, pointsLost: 1 });
+      score -= 2;
+      penalties.push({ category: CAT, message: `${unlabelled.length} input(s) without accessible labels`, pointsLost: 2 });
       issues.push({ category: CAT, severity: "warning",
         message: `${unlabelled.length} input(s) missing accessible labels`,
         explanation: "Screen readers cannot identify unlabelled inputs. Fails WCAG 2.1 SC 1.3.1.",
@@ -1376,13 +1454,13 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
     }
   }
 
-  // Images without alt
+  // Images without alt (2pts)
   const images = root.querySelectorAll("img");
   if (images.length > 0) {
     const missingAlt = images.filter((img) => img.getAttribute("alt") === null);
     if (missingAlt.length > 0) {
-      score -= 1;
-      penalties.push({ category: CAT, message: `${missingAlt.length} image(s) missing alt attribute`, pointsLost: 1 });
+      score -= 2;
+      penalties.push({ category: CAT, message: `${missingAlt.length} image(s) missing alt attribute`, pointsLost: 2 });
       issues.push({ category: CAT, severity: "warning",
         message: `${missingAlt.length} image(s) missing alt attribute`,
         explanation: "Images without alt are invisible to screen readers. Fails WCAG 2.1 SC 1.1.1 (Non-text Content).",
@@ -1395,7 +1473,7 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
     }
   }
 
-  // Main landmark + heading structure
+  // Main landmark + heading structure (1pt)
   const hasMain = !!root.querySelector("main") || !!root.querySelector('[role="main"]');
   const hasHeading = !!root.querySelector("h1, h2");
   if (!hasMain || !hasHeading) {
@@ -1413,7 +1491,71 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
       suggestion: "Use a logical heading hierarchy (h1 → h2 → h3) throughout the page." });
   }
 
+  // HTML lang attribute (1pt) — required by WCAG 2.1 SC 3.1.1
+  const htmlEl = root.querySelector("html");
+  const hasLang = !!htmlEl?.getAttribute("lang");
+  if (!hasLang) {
+    score -= 1;
+    penalties.push({ category: CAT, message: "Missing lang attribute on <html> element", pointsLost: 1 });
+    issues.push({ category: CAT, severity: "warning",
+      message: "Missing lang attribute on <html> element",
+      explanation: "Without a lang attribute, screen readers may use the wrong language for text-to-speech. Fails WCAG 2.1 SC 3.1.1.",
+      suggestion: 'Add lang attribute: <html lang="en"> (use the appropriate BCP47 language tag).' });
+  } else {
+    issues.push({ category: CAT, severity: "passed",
+      message: `HTML lang attribute present: "${htmlEl?.getAttribute("lang")}"`,
+      explanation: "Assistive technologies can select the correct language engine for text-to-speech.",
+      suggestion: "Ensure the lang value is a valid BCP47 language tag matching your content's primary language." });
+  }
+
   return { score: Math.max(0, score), issues, penalties };
+}
+
+// ================================================================
+// Headless Scan Module (feature-gated)
+// ================================================================
+
+/**
+ * Result from an optional headless browser scan.
+ * Available only when HEADLESS_SCAN=true and @playwright/test is installed.
+ */
+export interface HeadlessResult {
+  available: boolean;
+  renderBlockingCount: number | null;
+  totalResourceCount: number | null;
+  lcpMs: number | null;
+  axeViolationCount: number | null;
+  error?: string;
+}
+
+/**
+ * Feature-gated headless scan. Returns null when headless mode is disabled (default).
+ *
+ * Enable with environment variable: HEADLESS_SCAN=true
+ * Requires: @playwright/test to be installed
+ *
+ * When enabled, this will:
+ *   1. Launch a headless Chromium browser via Playwright
+ *   2. Collect render-blocking resource counts via window.performance
+ *   3. Count total network requests
+ *   4. Approximate LCP via PerformanceObserver
+ *   5. Run axe-core for WCAG violation detection
+ *
+ * Stub interface — deterministic score remains the primary result.
+ * This overlay is additive and non-destructive.
+ */
+export async function headlessScan(_url: string): Promise<HeadlessResult | null> {
+  if (process.env.HEADLESS_SCAN !== "true") {
+    return null;
+  }
+  return {
+    available: false,
+    renderBlockingCount: null,
+    totalResourceCount: null,
+    lcpMs: null,
+    axeViolationCount: null,
+    error: "Headless scan stub: install @playwright/test and implement the Playwright integration to enable.",
+  };
 }
 
 // ================================================================
@@ -1577,7 +1719,7 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
       suggestion: "Consolidate to a single redirect." });
   }
 
-  // Security Headers (35pts)
+  // Security Headers (30pts: CSP 12 + HSTS 9 + XFO 4 + Referrer 2 + Permissions 2 + COOP/COEP/CORP 1)
   const cspR = analyzeCsp(response.headers.get("content-security-policy"));
   const hstsR = analyzeHsts(response.headers.get("strict-transport-security"), usesHttps);
   const xfoR = scoreXFrameOptions(response.headers.get("x-frame-options"));
@@ -1597,12 +1739,22 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
   allIssues.push(...cspR.issues, ...hstsR.issues, ...xfoR.issues, ...rpR.issues, ...ppR.issues, ...coopR.issues);
   allPenalties.push(...cspR.penalties, ...hstsR.penalties, ...xfoR.penalties, ...rpR.penalties, ...ppR.penalties, ...coopR.penalties);
 
-  // Cookies & Session (20pts)
+  // Cookies & Session (15pts)
   const cookieR = scoreCookies(parsedCookies, finalUrl);
   allIssues.push(...cookieR.issues);
   allPenalties.push(...cookieR.penalties);
 
-  // Cache & Exposure (10pts)
+  // CORS (10pts)
+  const corsR = analyzeCors(
+    response.headers.get("access-control-allow-origin"),
+    response.headers.get("access-control-allow-credentials"),
+    response.headers.get("access-control-allow-methods"),
+    response.headers.get("access-control-allow-headers"),
+  );
+  allIssues.push(...corsR.issues);
+  allPenalties.push(...corsR.penalties);
+
+  // Cache & Exposure (7pts)
   const cacheR = scoreCacheHygiene(response.headers, apiExposure, hasCookies);
   allIssues.push(...cacheR.issues);
   allPenalties.push(...cacheR.penalties);
@@ -1617,14 +1769,14 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
   allIssues.push(...seoR.issues);
   allPenalties.push(...seoR.penalties);
 
-  // Accessibility (3pts)
+  // Accessibility (6pts: inputs 2 + images 2 + main/headings 1 + lang 1)
   const a11yR = scoreAccessibility(root);
   allIssues.push(...a11yR.issues);
   allPenalties.push(...a11yR.penalties);
 
-  // ---- Final totals ----
+  // ---- Final totals (10+30+15+10+7+15+7+6 = 100) ----
   const totalScore = Math.min(100, Math.max(0, Math.round(
-    httpsScore + securityScore + cookieR.score + cacheR.score + perfR.score + seoR.score + a11yR.score,
+    httpsScore + securityScore + cookieR.score + corsR.score + cacheR.score + perfR.score + seoR.score + a11yR.score,
   )));
 
   const grade =
@@ -1644,12 +1796,13 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
 
   const categoryScores = [
     { name: "HTTPS & Redirects", score: httpsScore, maxScore: 10, label: httpsScore >= 8 ? "Good" : httpsScore >= 5 ? "Fair" : "Poor" },
-    { name: "Security Headers", score: Math.round(securityScore * 10) / 10, maxScore: 35, label: securityScore >= 28 ? "Good" : securityScore >= 18 ? "Fair" : "Poor" },
-    { name: "Cookies & Session", score: cookieR.score, maxScore: 20, label: cookieR.score >= 16 ? "Good" : cookieR.score >= 10 ? "Fair" : "Poor" },
-    { name: "Cache & Exposure", score: cacheR.score, maxScore: 10, label: cacheR.score >= 8 ? "Good" : cacheR.score >= 5 ? "Fair" : "Poor" },
+    { name: "Security Headers", score: Math.round(securityScore * 10) / 10, maxScore: 30, label: securityScore >= 24 ? "Good" : securityScore >= 15 ? "Fair" : "Poor" },
+    { name: "Cookies & Session", score: cookieR.score, maxScore: 15, label: cookieR.score >= 12 ? "Good" : cookieR.score >= 7 ? "Fair" : "Poor" },
+    { name: "CORS", score: Math.round(corsR.score * 10) / 10, maxScore: 10, label: corsR.score >= 8 ? "Good" : corsR.score >= 5 ? "Fair" : "Poor" },
+    { name: "Cache & Exposure", score: cacheR.score, maxScore: 7, label: cacheR.score >= 5 ? "Good" : cacheR.score >= 3 ? "Fair" : "Poor" },
     { name: "Performance", score: Math.round(perfR.score * 10) / 10, maxScore: 15, label: perfR.score >= 12 ? "Good" : perfR.score >= 8 ? "Fair" : "Poor" },
     { name: "SEO", score: Math.round(seoR.score * 10) / 10, maxScore: 7, label: seoR.score >= 5.6 ? "Good" : seoR.score >= 3.5 ? "Fair" : "Poor" },
-    { name: "Accessibility", score: a11yR.score, maxScore: 3, label: a11yR.score >= 2 ? "Good" : a11yR.score >= 1 ? "Fair" : "Poor" },
+    { name: "Accessibility", score: a11yR.score, maxScore: 6, label: a11yR.score >= 5 ? "Good" : a11yR.score >= 3 ? "Fair" : "Poor" },
   ];
 
   const criticalIssues = allIssues.filter((i) => i.severity === "critical");
@@ -1697,6 +1850,7 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
     fixPrompt,
     htmlHash,
     responseHeadersSnapshot,
+    corsScore: corsR.score,
     scoreKillers,
     canonicalUrl: seoR.canonicalUrl,
     hasStructuredData: seoR.hasStructuredData,

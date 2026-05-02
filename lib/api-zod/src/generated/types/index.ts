@@ -11,6 +11,8 @@ export * from "./deleteResponse";
 export * from "./errorResponse";
 export * from "./healthStatus";
 export * from "./listScansParams";
+export * from "./mlOverlayResult";
+export * from "./mlOverlayResultFeatureImportanceItem";
 export * from "./scanIssue";
 export * from "./scanIssueSeverity";
 export * from "./scanListResponse";
