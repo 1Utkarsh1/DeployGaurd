@@ -1,0 +1,75 @@
+You are a senior full-stack engineer working inside Replit.
+
+Build **DeployGuard**, a launch-readiness dashboard for web apps.
+
+## Mandatory stack
+- Frontend: React + Vite
+- Backend: Node.js + Express
+- DB: SQLite (file-based)
+- Styling: Tailwind (preferred)
+
+## Core flow
+1) User enters a URL.
+2) Backend does safe checks.
+3) Return score (0-100), grade, category breakdown, issues with severity, fix prompt.
+4) Save each scan to SQLite.
+
+## API endpoints
+POST /api/scan
+- Validate URL
+- Add https:// if missing
+- SSRF & safety checks: allow only http/https, block localhost/127.0.0.1, block private IP ranges
+- 8s timeout
+- Follow redirects but record chain
+- Gather:
+  - basic: status code, redirect chain, final URL, HTTPS usage, response time
+  - SEO/meta: title, meta description, viewport tag, Open Graph tags
+  - files: robots.txt, sitemap.xml
+  - security headers present: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Strict-Transport-Security
+  - cookies: warn on missing HttpOnly/Secure/SameSite
+  - safe API exposure: check only GET/HEAD on /api, /api/health, /health, /docs, /swagger with short timeouts (no fuzzing)
+  - performance: HTML size, response time bucket, script tag count
+- Scoring weights:
+  - HTTPS & redirects 15
+  - Security headers 30
+  - SEO 20
+  - robots/sitemap 10
+  - cookies 10
+  - performance 10
+  - API exposure 5
+- Grade: Excellent / Good / Needs Work / Risky
+- Issues array: { category, severity (critical/warning/info/passed), message, explanation, suggestion }
+- Generate dynamic copyable "Agent Fix Prompt" summarizing issues.
+
+GET /api/scans -> list recent scans (id, url, score, grade, created_at)
+GET /api/scans/:id -> full scan data
+DELETE /api/scans/:id -> delete scan
+
+## Frontend
+Build a modern dashboard:
+- Hero section with branding (DeployGuard) and tagline
+- URL input card with submit button, loading states, validation errors
+- Score widget (gauge or big number) + grade badge
+- Category cards with sub-scores
+- Issue list grouped by category, severity badges
+- Fix prompt panel with copy button
+- History section: shows recent scans; click to reload; delete
+- Demo mode button: loads realistic fake scan
+
+## README
+- Overview, features, tech stack
+- How to run in Replit (install deps, run server + client)
+- Safety disclaimer
+- Quick demo steps
+
+## Implementation order
+1) project structure
+2) backend API
+3) scanner + scoring
+4) SQLite layer
+5) frontend UI
+6) history
+7) demo mode
+8) polish
+9) README
+10) test

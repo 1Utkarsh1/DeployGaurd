@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "DeployGuard"
+version = "1.0.0"
+id = "artifacts/deployguard"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22577
+
+[services.development]
+run = "pnpm --filter @workspace/deployguard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/deployguard", "run", "build" ]
+publicDir = "artifacts/deployguard/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22577"
+BASE_PATH = "/"

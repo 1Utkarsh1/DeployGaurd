@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: DeployGuard API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: scans
+    description: URL scan operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,123 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /scan:
+    post:
+      operationId: createScan
+      tags: [scans]
+      summary: Scan a URL for launch readiness
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScanRequest"
+      responses:
+        "200":
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+        "400":
+          description: Invalid URL or SSRF blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Scan failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /scans:
+    get:
+      operationId: listScans
+      tags: [scans]
+      summary: List recent scans
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of recent scans
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanListResponse"
+
+  /scans/{id}:
+    get:
+      operationId: getScan
+      tags: [scans]
+      summary: Get full scan data by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Full scan data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+        "404":
+          description: Scan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteScan
+      tags: [scans]
+      summary: Delete a scan by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "404":
+          description: Scan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /scans/stats:
+    get:
+      operationId: getScanStats
+      tags: [scans]
+      summary: Get aggregated scan statistics
+      responses:
+        "200":
+          description: Scan statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanStats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +153,204 @@ components:
       required:
         - status
 
+    ScanRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          description: URL to scan
+      required:
+        - url
+
+    ScanIssue:
+      type: object
+      properties:
+        category:
+          type: string
+        severity:
+          type: string
+          enum: [critical, warning, info, passed]
+        message:
+          type: string
+        explanation:
+          type: string
+        suggestion:
+          type: string
+      required:
+        - category
+        - severity
+        - message
+        - explanation
+        - suggestion
+
+    CategoryScore:
+      type: object
+      properties:
+        name:
+          type: string
+        score:
+          type: number
+        maxScore:
+          type: number
+        label:
+          type: string
+      required:
+        - name
+        - score
+        - maxScore
+        - label
+
+    ScanResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        finalUrl:
+          type: string
+        score:
+          type: number
+        grade:
+          type: string
+          enum: [Excellent, Good, "Needs Work", Risky]
+        statusCode:
+          type: integer
+        redirectChain:
+          type: array
+          items:
+            type: string
+        usesHttps:
+          type: boolean
+        responseTimeMs:
+          type: number
+        title:
+          type: string
+          nullable: true
+        metaDescription:
+          type: string
+          nullable: true
+        hasViewport:
+          type: boolean
+        hasOpenGraph:
+          type: boolean
+        hasRobotsTxt:
+          type: boolean
+        hasSitemapXml:
+          type: boolean
+        securityHeaders:
+          type: object
+          additionalProperties:
+            type: boolean
+        cookieIssues:
+          type: array
+          items:
+            type: string
+        htmlSizeKb:
+          type: number
+        scriptTagCount:
+          type: integer
+        categoryScores:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryScore"
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanIssue"
+        fixPrompt:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - url
+        - finalUrl
+        - score
+        - grade
+        - statusCode
+        - redirectChain
+        - usesHttps
+        - responseTimeMs
+        - hasViewport
+        - hasOpenGraph
+        - hasRobotsTxt
+        - hasSitemapXml
+        - securityHeaders
+        - cookieIssues
+        - htmlSizeKb
+        - scriptTagCount
+        - categoryScores
+        - issues
+        - fixPrompt
+        - createdAt
+
+    ScanSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+        score:
+          type: number
+        grade:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - url
+        - score
+        - grade
+        - createdAt
+
+    ScanListResponse:
+      type: object
+      properties:
+        scans:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanSummary"
+        total:
+          type: integer
+      required:
+        - scans
+        - total
+
+    ScanStats:
+      type: object
+      properties:
+        totalScans:
+          type: integer
+        averageScore:
+          type: number
+        gradeCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanSummary"
+      required:
+        - totalScans
+        - averageScore
+        - gradeCounts
+        - recentActivity
+
+    DeleteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required:
+        - success
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
