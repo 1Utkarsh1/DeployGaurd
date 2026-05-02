@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useListScans, useGetScanStats, useDeleteScan, getListScansQueryKey, getGetScanStatsQueryKey } from "@workspace/api-client-react";
 import type { ScanSummary } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -5,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Trash2, ExternalLink, Activity } from "lucide-react";
+import { Trash2, ExternalLink, Activity, AlertTriangle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface HistorySectionProps {
@@ -14,16 +15,19 @@ interface HistorySectionProps {
 
 export function HistorySection({ onSelectScan }: HistorySectionProps) {
   const queryClient = useQueryClient();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
   const { data: statsData, isLoading: isLoadingStats } = useGetScanStats();
   const { data: listData, isLoading: isLoadingList } = useListScans();
 
   const deleteScan = useDeleteScan({
     mutation: {
       onSuccess: () => {
+        setConfirmDeleteId(null);
         queryClient.invalidateQueries({ queryKey: getListScansQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetScanStatsQueryKey() });
-      }
-    }
+      },
+    },
   });
 
   const getScoreColor = (score: number) => {
@@ -32,10 +36,22 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
     return "text-destructive";
   };
 
-  const handleDelete = (e: React.MouseEvent, id: number) => {
+  const handleDeleteClick = (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
-    deleteScan.mutate({ id });
+    if (confirmDeleteId === id) {
+      deleteScan.mutate({ id });
+    } else {
+      setConfirmDeleteId(id);
+    }
   };
+
+  const handleCancelDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmDeleteId(null);
+  };
+
+  const averageScoreDisplay =
+    statsData?.averageScore !== undefined ? statsData.averageScore.toFixed(1) : "—";
 
   return (
     <div className="space-y-8 mt-16 pt-16 border-t border-border/40">
@@ -48,38 +64,50 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-card/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Total Scans</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total Scans</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoadingStats ? <Skeleton className="h-8 w-16" /> : (
-              <div className="text-3xl font-bold">{statsData?.totalScans || 0}</div>
+            {isLoadingStats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              <div className="text-3xl font-bold tabular-nums">{statsData?.totalScans ?? 0}</div>
             )}
           </CardContent>
         </Card>
+
         <Card className="bg-card/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Avg Score</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Avg Score</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoadingStats ? <Skeleton className="h-8 w-16" /> : (
-              <div className={`text-3xl font-bold ${getScoreColor(statsData?.averageScore || 0)}`}>
-                {statsData?.averageScore?.toFixed(1) || 0}
+            {isLoadingStats ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              <div className={`text-3xl font-bold tabular-nums ${getScoreColor(statsData?.averageScore ?? 0)}`}>
+                {averageScoreDisplay}
               </div>
             )}
           </CardContent>
         </Card>
+
         <Card className="bg-card/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Grade Distribution</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Grade Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            {isLoadingStats ? <Skeleton className="h-8 w-full" /> : (
+            {isLoadingStats ? (
+              <Skeleton className="h-8 w-full" />
+            ) : (
               <div className="flex flex-wrap gap-2">
-                {Object.entries(statsData?.gradeCounts || {}).map(([grade, count]) => (
-                  <Badge key={grade} variant="secondary" className="font-mono">
-                    {grade}: {count}
-                  </Badge>
-                ))}
+                {Object.keys(statsData?.gradeCounts ?? {}).length === 0 ? (
+                  <span className="text-sm text-muted-foreground">No scans yet</span>
+                ) : (
+                  Object.entries(statsData?.gradeCounts ?? {}).map(([grade, count]) => (
+                    <Badge key={grade} variant="secondary" className="font-mono text-xs">
+                      {grade}: {count}
+                    </Badge>
+                  ))
+                )}
               </div>
             )}
           </CardContent>
@@ -89,62 +117,95 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
       {/* History Table */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Recent Scans</CardTitle>
+          <CardTitle className="text-lg">Recent Scans</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoadingList ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
             </div>
           ) : !listData?.scans?.length ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No scans performed yet. Enter a URL above to start.
+            <div className="text-center py-12 text-muted-foreground">
+              <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p>No scans yet. Enter a URL above to get started.</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>URL</TableHead>
-                  <TableHead className="w-[100px] text-right">Score</TableHead>
-                  <TableHead className="w-[150px]">Grade</TableHead>
-                  <TableHead className="w-[200px]">Date</TableHead>
-                  <TableHead className="w-[80px]"></TableHead>
+                  <TableHead className="w-[80px] text-right">Score</TableHead>
+                  <TableHead className="w-[130px]">Grade</TableHead>
+                  <TableHead className="w-[160px]">Date</TableHead>
+                  <TableHead className="w-[120px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {listData.scans.map((scan: ScanSummary) => (
                   <TableRow
                     key={scan.id}
-                    className="cursor-pointer hover:bg-muted/50 group"
-                    onClick={() => onSelectScan(scan.id)}
+                    className="cursor-pointer hover:bg-muted/40 group"
+                    onClick={() => {
+                      if (confirmDeleteId !== scan.id) onSelectScan(scan.id);
+                    }}
                   >
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        {scan.url}
-                        <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate max-w-[260px] font-mono text-sm" title={scan.url}>
+                          {scan.url}
+                        </span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </TableCell>
-                    <TableCell className={`text-right font-bold ${getScoreColor(scan.score)}`}>
+                    <TableCell className={`text-right font-bold tabular-nums ${getScoreColor(scan.score)}`}>
                       {scan.score}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{scan.grade}</Badge>
+                      <Badge variant="outline" className="text-xs">{scan.grade}</Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {new Date(scan.createdAt).toLocaleDateString()}
+                    <TableCell className="text-muted-foreground text-sm tabular-nums">
+                      {new Date(scan.createdAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => handleDelete(e, scan.id)}
-                        disabled={deleteScan.isPending}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        {confirmDeleteId === scan.id ? (
+                          <>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => handleDeleteClick(e, scan.id)}
+                              disabled={deleteScan.isPending}
+                            >
+                              <AlertTriangle className="h-3 w-3 mr-1" />
+                              Confirm
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={handleCancelDelete}
+                            >
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => handleDeleteClick(e, scan.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,23 +8,38 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 
 const formSchema = z.object({
-  url: z.string().url("Please enter a valid URL (e.g., https://example.com)"),
+  url: z.preprocess(
+    (val) => {
+      if (typeof val !== "string") return val;
+      const trimmed = val.trim();
+      if (!trimmed) return trimmed;
+      if (/^https?:\/\//i.test(trimmed)) return trimmed;
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+      return `https://${trimmed}`;
+    },
+    z.string().min(1, "Please enter a URL").url("Please enter a valid URL (e.g. github.com)")
+  ),
 });
+
+type FormValues = z.infer<typeof formSchema>;
 
 interface ScanInputProps {
   onScan: (url: string) => void;
   isScanning: boolean;
+  scanKey?: number;
 }
 
-export function ScanInput({ onScan, isScanning }: ScanInputProps) {
-  const form = useForm<z.infer<typeof formSchema>>({
+export function ScanInput({ onScan, isScanning, scanKey }: ScanInputProps) {
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      url: "",
-    },
+    defaultValues: { url: "" },
   });
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
+  useEffect(() => {
+    if (scanKey) form.reset({ url: "" });
+  }, [scanKey, form]);
+
+  function onSubmit(values: FormValues) {
     onScan(values.url);
   }
 

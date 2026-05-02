@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Navbar } from "@/components/layout/Navbar";
 import { ScanInput } from "@/components/scan/ScanInput";
 import { ScanResults } from "@/components/scan/ScanResults";
@@ -17,6 +17,8 @@ import { useToast } from "@/hooks/use-toast";
 export default function Home() {
   const [activeScan, setActiveScan] = useState<ScanResult | null>(null);
   const [selectedScanId, setSelectedScanId] = useState<number | null>(null);
+  const [scanKey, setScanKey] = useState(0);
+  const resultsRef = useRef<HTMLElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -25,8 +27,12 @@ export default function Home() {
       onSuccess: (data) => {
         setActiveScan(data);
         setSelectedScanId(null);
+        setScanKey((k) => k + 1);
         queryClient.invalidateQueries({ queryKey: getListScansQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetScanStatsQueryKey() });
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
       },
       onError: (err) => {
         const message =
@@ -56,7 +62,9 @@ export default function Home() {
   const handleSelectHistoryScan = (id: number) => {
     setSelectedScanId(id);
     setActiveScan(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
   };
 
   const currentResult = selectedScanData || activeScan;
@@ -70,11 +78,11 @@ export default function Home() {
 
       <main className="flex-1 container mx-auto max-w-screen-xl px-4 py-12 relative z-10">
         <section className="mb-16">
-          <ScanInput onScan={handleScan} isScanning={createScan.isPending} />
+          <ScanInput onScan={handleScan} isScanning={createScan.isPending} scanKey={scanKey} />
         </section>
 
         {currentResult && (
-          <section className="mb-16">
+          <section className="mb-16" ref={resultsRef}>
             <ScanResults result={currentResult} />
           </section>
         )}
