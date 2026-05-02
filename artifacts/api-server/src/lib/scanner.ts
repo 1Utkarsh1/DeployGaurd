@@ -48,10 +48,15 @@ export interface ScanResult {
 
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return `https://${trimmed}`;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
   }
-  return trimmed;
+  // Preserve any other explicit scheme (ftp://, file://, etc.) so validateSsrf
+  // can reject it cleanly with the right error message instead of garbling it.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
 }
 
 function validateSsrf(url: string): void {

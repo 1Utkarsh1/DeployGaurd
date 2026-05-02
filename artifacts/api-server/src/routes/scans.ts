@@ -19,7 +19,8 @@ const router: IRouter = Router();
 router.post("/scan", async (req, res): Promise<void> => {
   const parsed = CreateScanBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    const first = parsed.error.issues[0];
+    res.status(400).json({ error: first?.message ?? "Invalid request body" });
     return;
   }
 
