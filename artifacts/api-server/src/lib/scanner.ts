@@ -155,7 +155,12 @@ async function checkApiExposure(baseUrl: string): Promise<{ paths: string[]; iss
         if (res.ok) {
           exposed.push(p);
           if (p === "/docs" || p === "/swagger") {
-            issues.push(`API docs exposed at ${p} — consider restricting access in production`);
+            // Only flag if the response is actually API docs (JSON/YAML), not an HTML SPA fallback
+            const contentType = res.headers.get("content-type") ?? "";
+            const isHtml = contentType.includes("text/html");
+            if (!isHtml) {
+              issues.push(`API docs exposed at ${p} — consider restricting access in production`);
+            }
           }
         }
       } catch {
