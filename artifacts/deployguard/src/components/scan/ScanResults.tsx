@@ -270,6 +270,47 @@ export function ScanResults({ result }: { result: ScanResult }) {
         </div>
       </div>
 
+      {/* Headless Scan Metrics */}
+      {(result as { headlessScan?: { available: boolean; totalResourceCount: number | null; totalTransferSizeKb: number | null; renderBlockingCount: number | null; lcpMs: number | null; axeViolationCount: number | null; headlessScore: number | null; error?: string } | null }).headlessScan?.available && (
+        (() => {
+          const hs = (result as { headlessScan: { available: boolean; totalResourceCount: number | null; totalTransferSizeKb: number | null; renderBlockingCount: number | null; lcpMs: number | null; axeViolationCount: number | null; headlessScore: number | null } }).headlessScan;
+          return (
+            <Card className="bg-card/50 border-primary/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  🔬 Headless Browser Metrics
+                  {hs.headlessScore !== null && (
+                    <Badge variant="outline" className={`ml-auto font-mono ${getScoreColor((hs.headlessScore / 10) * 100)}`}>
+                      Score: {hs.headlessScore}/10
+                    </Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>Real browser-loaded performance data</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {[
+                    { label: "Resources Loaded", value: hs.totalResourceCount !== null ? String(hs.totalResourceCount) : "—", unit: "" },
+                    { label: "Transfer Size", value: hs.totalTransferSizeKb !== null ? hs.totalTransferSizeKb.toFixed(1) : "—", unit: "kb" },
+                    { label: "Render-blocking", value: hs.renderBlockingCount !== null ? String(hs.renderBlockingCount) : "—", unit: "" },
+                    { label: "LCP", value: hs.lcpMs !== null ? String(Math.round(hs.lcpMs)) : "—", unit: hs.lcpMs !== null ? "ms" : "" },
+                    { label: "Axe Violations", value: hs.axeViolationCount !== null ? String(hs.axeViolationCount) : "—", unit: "" },
+                  ].map(({ label, value, unit }) => (
+                    <div key={label} className="text-center p-3 rounded-lg bg-muted/30">
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{label}</div>
+                      <div className="text-xl font-bold font-mono">
+                        {value}
+                        {unit && <span className="text-xs font-normal text-muted-foreground ml-0.5">{unit}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()
+      )}
+
       {/* Third-party Domains */}
       {thirdPartyDomains.length > 0 && (
         <div>

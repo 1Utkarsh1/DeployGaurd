@@ -85,6 +85,7 @@ router.post("/scan", scanRateLimiter, async (req, res): Promise<void> => {
       thirdPartyScore: result.thirdPartyScore,
       thirdPartyDomains: result.thirdPartyDomains,
       aiOverlay: result.aiOverlay ?? null,
+      headlessScan: result.headlessScan ?? null,
       enginesRan: result.enginesRan,
     })
     .returning();

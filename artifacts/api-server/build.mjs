@@ -100,6 +100,10 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      "node-llama-cpp",
+      "@node-llama-cpp/*",
+      "axe-core",
+      "@reflink/*",
     ],
     sourcemap: "linked",
     plugins: [

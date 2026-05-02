@@ -322,6 +322,33 @@ components:
           $ref: "#/components/schemas/AiOverlayResult"
           nullable: true
           description: AI overlay score (present when LOCAL_AI=true, null otherwise)
+        headlessScan:
+          nullable: true
+          description: Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise)
+          type: object
+          properties:
+            available:
+              type: boolean
+            totalResourceCount:
+              type: number
+              nullable: true
+            totalTransferSizeKb:
+              type: number
+              nullable: true
+            renderBlockingCount:
+              type: number
+              nullable: true
+            lcpMs:
+              type: number
+              nullable: true
+            axeViolationCount:
+              type: number
+              nullable: true
+            headlessScore:
+              type: number
+              nullable: true
+            error:
+              type: string
         enginesRan:
           type: array
           items:

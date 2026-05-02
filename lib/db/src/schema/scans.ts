@@ -67,6 +67,16 @@ export const scansTable = pgTable("scans", {
     riskLabel: string;
     engineUsed: string;
   } | null>(),
+  headlessScan: jsonb("headless_scan").$type<{
+    available: boolean;
+    totalResourceCount: number | null;
+    totalTransferSizeKb: number | null;
+    renderBlockingCount: number | null;
+    lcpMs: number | null;
+    axeViolationCount: number | null;
+    headlessScore: number | null;
+    error?: string;
+  } | null>(),
   enginesRan: jsonb("engines_ran").notNull().$type<string[]>().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

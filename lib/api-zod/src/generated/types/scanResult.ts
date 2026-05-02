@@ -10,6 +10,7 @@ import type { CategoryScore } from "./categoryScore";
 import type { MlOverlayResult } from "./mlOverlayResult";
 import type { ScanIssue } from "./scanIssue";
 import type { ScanResultGrade } from "./scanResultGrade";
+import type { ScanResultHeadlessScan } from "./scanResultHeadlessScan";
 import type { ScanResultResponseHeadersSnapshot } from "./scanResultResponseHeadersSnapshot";
 import type { ScanResultSecurityHeaders } from "./scanResultSecurityHeaders";
 import type { ScoreKiller } from "./scoreKiller";
@@ -59,6 +60,8 @@ export interface ScanResult {
   thirdPartyDomains: string[];
   /** AI overlay score (present when LOCAL_AI=true, null otherwise) */
   aiOverlay?: AiOverlayResult | null;
+  /** Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise) */
+  headlessScan?: ScanResultHeadlessScan;
   /** Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai) */
   enginesRan: string[];
   /** Optional ML/rule-based grade adjustment (absent when not computed) */

@@ -136,6 +136,7 @@ export interface ScanResult {
   thirdPartyScore: number;
   thirdPartyDomains: string[];
   aiOverlay: AiOverlayResult | null;
+  headlessScan: import("./headless.js").HeadlessResult | null;
   enginesRan: string[];
 }
 
@@ -1882,6 +1883,7 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
     thirdPartyScore: tpR.score,
     thirdPartyDomains: tpR.thirdPartyDomains,
     aiOverlay: aiOverlay ?? null,
+    headlessScan: headlessR ?? null,
     enginesRan,
   };
 }

@@ -30,3 +30,12 @@ externalPort = 80
 [[ports]]
 localPort = 22577
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+HEADLESS_SCAN = "true"
+LOCAL_AI = "true"
+
+[nix]
+channel = "stable-25_05"

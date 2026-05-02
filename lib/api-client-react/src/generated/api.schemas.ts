@@ -66,6 +66,20 @@ export type ScanResultSecurityHeaders = { [key: string]: boolean };
 export type ScanResultResponseHeadersSnapshot = { [key: string]: string };
 
 /**
+ * Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise)
+ */
+export type ScanResultHeadlessScan = {
+  available?: boolean;
+  totalResourceCount?: number | null;
+  totalTransferSizeKb?: number | null;
+  renderBlockingCount?: number | null;
+  lcpMs?: number | null;
+  axeViolationCount?: number | null;
+  headlessScore?: number | null;
+  error?: string;
+} | null;
+
+/**
  * AI overlay score (feature gated via LOCAL_AI=true)
  */
 export interface AiOverlayResult {
@@ -144,6 +158,8 @@ export interface ScanResult {
   thirdPartyDomains: string[];
   /** AI overlay score (present when LOCAL_AI=true, null otherwise) */
   aiOverlay?: AiOverlayResult | null;
+  /** Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise) */
+  headlessScan?: ScanResultHeadlessScan;
   /** Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai) */
   enginesRan: string[];
   /** Optional ML/rule-based grade adjustment (absent when not computed) */

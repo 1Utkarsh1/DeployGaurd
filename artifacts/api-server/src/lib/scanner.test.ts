@@ -535,14 +535,15 @@ describe("headlessScan", () => {
     expect(result).toBeNull();
   });
 
-  it("returns a HeadlessResult stub (not null) when HEADLESS_SCAN=true", async () => {
+  it("returns a HeadlessResult (not null) when HEADLESS_SCAN=true", async () => {
     process.env.HEADLESS_SCAN = "true";
     const result = await headlessScan("https://example.com");
     expect(result).not.toBeNull();
-    expect(result?.available).toBe(false);
-    expect(result?.error).toBeDefined();
+    // Result shape is valid regardless of whether playwright+chromium are installed
+    expect(typeof result?.available).toBe("boolean");
+    expect("headlessScore" in (result ?? {})).toBe(true);
     delete process.env.HEADLESS_SCAN;
-  });
+  }, 30_000);
 });
 
 // ============================================================

@@ -119,6 +119,21 @@ export const CreateScanResponse = zod.object({
     })
     .nullish()
     .describe("AI overlay score (present when LOCAL_AI=true, null otherwise)"),
+  headlessScan: zod
+    .object({
+      available: zod.boolean().optional(),
+      totalResourceCount: zod.number().nullish(),
+      totalTransferSizeKb: zod.number().nullish(),
+      renderBlockingCount: zod.number().nullish(),
+      lcpMs: zod.number().nullish(),
+      axeViolationCount: zod.number().nullish(),
+      headlessScore: zod.number().nullish(),
+      error: zod.string().optional(),
+    })
+    .nullish()
+    .describe(
+      "Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise)",
+    ),
   enginesRan: zod
     .array(zod.string())
     .describe(
@@ -275,6 +290,21 @@ export const GetScanResponse = zod.object({
     })
     .nullish()
     .describe("AI overlay score (present when LOCAL_AI=true, null otherwise)"),
+  headlessScan: zod
+    .object({
+      available: zod.boolean().optional(),
+      totalResourceCount: zod.number().nullish(),
+      totalTransferSizeKb: zod.number().nullish(),
+      renderBlockingCount: zod.number().nullish(),
+      lcpMs: zod.number().nullish(),
+      axeViolationCount: zod.number().nullish(),
+      headlessScore: zod.number().nullish(),
+      error: zod.string().optional(),
+    })
+    .nullish()
+    .describe(
+      "Headless browser metrics (present when HEADLESS_SCAN=true, null otherwise)",
+    ),
   enginesRan: zod
     .array(zod.string())
     .describe(
