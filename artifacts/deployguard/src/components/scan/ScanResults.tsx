@@ -224,6 +224,51 @@ export function ScanResults({ result }: { result: ScanResult }) {
         ))}
       </div>
 
+      {/* Scan Evidence Panel */}
+      <Card className="border-border/40 bg-muted/20">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            Scan Evidence
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Cryptographic proof this scan was fetched live — not faked or cached.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-mono">
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">Final URL</dt>
+              <dd className="truncate text-foreground/80">{result.finalUrl}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">HTTP Status</dt>
+              <dd className="text-foreground/80">{result.statusCode}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">Body SHA-256 (first 16 chars)</dt>
+              <dd className="text-foreground/80 tracking-widest">{result.htmlHash}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">Response Time</dt>
+              <dd className="text-foreground/80">{Math.round(result.responseTimeMs)} ms</dd>
+            </div>
+            {Object.keys(result.responseHeadersSnapshot).length > 0 && (
+              <div className="sm:col-span-2">
+                <dt className="text-xs text-muted-foreground mb-1">Headers Received</dt>
+                <dd className="flex flex-wrap gap-1.5">
+                  {Object.entries(result.responseHeadersSnapshot).map(([k, v]) => (
+                    <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted border border-border/40 text-xs text-muted-foreground">
+                      <span className="text-foreground/60">{k}:</span>
+                      <span className="truncate max-w-[180px]">{v}</span>
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </CardContent>
+      </Card>
+
       {/* Fix Prompt Panel */}
       <Card className="border-primary/20 bg-primary/5">
         <CardHeader className="pb-3">

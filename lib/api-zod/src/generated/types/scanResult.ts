@@ -8,6 +8,7 @@
 import type { CategoryScore } from "./categoryScore";
 import type { ScanIssue } from "./scanIssue";
 import type { ScanResultGrade } from "./scanResultGrade";
+import type { ScanResultResponseHeadersSnapshot } from "./scanResultResponseHeadersSnapshot";
 import type { ScanResultSecurityHeaders } from "./scanResultSecurityHeaders";
 
 export interface ScanResult {
@@ -33,5 +34,9 @@ export interface ScanResult {
   categoryScores: CategoryScore[];
   issues: ScanIssue[];
   fixPrompt: string;
+  /** SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved */
+  htmlHash: string;
+  /** Subset of response headers actually received (security + diagnostic headers) */
+  responseHeadersSnapshot: ScanResultResponseHeadersSnapshot;
   createdAt: string;
 }

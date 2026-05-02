@@ -51,6 +51,11 @@ export const ScanResultGrade = {
 
 export type ScanResultSecurityHeaders = { [key: string]: boolean };
 
+/**
+ * Subset of response headers actually received (security + diagnostic headers)
+ */
+export type ScanResultResponseHeadersSnapshot = { [key: string]: string };
+
 export interface ScanResult {
   id: number;
   url: string;
@@ -74,6 +79,10 @@ export interface ScanResult {
   categoryScores: CategoryScore[];
   issues: ScanIssue[];
   fixPrompt: string;
+  /** SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved */
+  htmlHash: string;
+  /** Subset of response headers actually received (security + diagnostic headers) */
+  responseHeadersSnapshot: ScanResultResponseHeadersSnapshot;
   createdAt: string;
 }
 

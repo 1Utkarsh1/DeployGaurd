@@ -51,6 +51,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit or concurrency limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Scan failed
           content:
@@ -260,6 +266,14 @@ components:
             $ref: "#/components/schemas/ScanIssue"
         fixPrompt:
           type: string
+        htmlHash:
+          type: string
+          description: SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved
+        responseHeadersSnapshot:
+          type: object
+          additionalProperties:
+            type: string
+          description: Subset of response headers actually received (security + diagnostic headers)
         createdAt:
           type: string
       required:
@@ -283,6 +297,8 @@ components:
         - categoryScores
         - issues
         - fixPrompt
+        - htmlHash
+        - responseHeadersSnapshot
         - createdAt
 
     ScanSummary:

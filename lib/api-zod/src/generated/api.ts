@@ -60,6 +60,16 @@ export const CreateScanResponse = zod.object({
     }),
   ),
   fixPrompt: zod.string(),
+  htmlHash: zod
+    .string()
+    .describe(
+      "SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved",
+    ),
+  responseHeadersSnapshot: zod
+    .record(zod.string(), zod.string())
+    .describe(
+      "Subset of response headers actually received (security + diagnostic headers)",
+    ),
   createdAt: zod.string(),
 });
 
@@ -132,6 +142,16 @@ export const GetScanResponse = zod.object({
     }),
   ),
   fixPrompt: zod.string(),
+  htmlHash: zod
+    .string()
+    .describe(
+      "SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved",
+    ),
+  responseHeadersSnapshot: zod
+    .record(zod.string(), zod.string())
+    .describe(
+      "Subset of response headers actually received (security + diagnostic headers)",
+    ),
   createdAt: zod.string(),
 });
 

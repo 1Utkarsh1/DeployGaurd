@@ -17,6 +17,7 @@ export * from "./scanListResponse";
 export * from "./scanRequest";
 export * from "./scanResult";
 export * from "./scanResultGrade";
+export * from "./scanResultResponseHeadersSnapshot";
 export * from "./scanResultSecurityHeaders";
 export * from "./scanStats";
 export * from "./scanStatsGradeCounts";

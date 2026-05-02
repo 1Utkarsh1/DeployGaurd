@@ -1,4 +1,13 @@
-import { pgTable, serial, text, integer, real, boolean, jsonb, timestamp } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  text,
+  integer,
+  real,
+  boolean,
+  jsonb,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -22,9 +31,25 @@ export const scansTable = pgTable("scans", {
   cookieIssues: jsonb("cookie_issues").notNull().$type<string[]>(),
   htmlSizeKb: real("html_size_kb").notNull(),
   scriptTagCount: integer("script_tag_count").notNull(),
-  categoryScores: jsonb("category_scores").notNull().$type<Array<{ name: string; score: number; maxScore: number; label: string }>>(),
-  issues: jsonb("issues").notNull().$type<Array<{ category: string; severity: string; message: string; explanation: string; suggestion: string }>>(),
+  categoryScores: jsonb("category_scores").notNull().$type<
+    Array<{ name: string; score: number; maxScore: number; label: string }>
+  >(),
+  issues: jsonb("issues").notNull().$type<
+    Array<{
+      category: string;
+      severity: string;
+      message: string;
+      explanation: string;
+      suggestion: string;
+    }>
+  >(),
   fixPrompt: text("fix_prompt").notNull(),
+  // Evidence fields — prove the fetch happened without exposing full HTML
+  htmlHash: text("html_hash").notNull().default(""),
+  responseHeadersSnapshot: jsonb("response_headers_snapshot")
+    .notNull()
+    .$type<Record<string, string>>()
+    .default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

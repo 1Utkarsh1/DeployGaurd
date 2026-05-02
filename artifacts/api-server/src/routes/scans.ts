@@ -13,10 +13,16 @@ import {
   GetScanStatsResponse,
 } from "@workspace/api-zod";
 import { scanUrl } from "../lib/scanner";
+import { scanRateLimiter } from "../middlewares/rateLimiter";
 
 const router: IRouter = Router();
 
-router.post("/scan", async (req, res): Promise<void> => {
+// Max concurrent scans — each scan makes multiple outbound HTTP requests.
+// Beyond this threshold we return 429 immediately rather than queuing.
+let activeScanCount = 0;
+const MAX_CONCURRENT_SCANS = 3;
+
+router.post("/scan", scanRateLimiter, async (req, res): Promise<void> => {
   const parsed = CreateScanBody.safeParse(req.body);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -24,8 +30,17 @@ router.post("/scan", async (req, res): Promise<void> => {
     return;
   }
 
+  if (activeScanCount >= MAX_CONCURRENT_SCANS) {
+    res.setHeader("Retry-After", "10");
+    res.status(429).json({
+      error: `Server is busy (${activeScanCount} scans in progress). Please try again in a few seconds.`,
+    });
+    return;
+  }
+
   const { url } = parsed.data;
 
+  activeScanCount++;
   let result;
   try {
     result = await scanUrl(url);
@@ -34,6 +49,8 @@ router.post("/scan", async (req, res): Promise<void> => {
     req.log.warn({ url, err: msg }, "Scan failed");
     res.status(400).json({ error: msg });
     return;
+  } finally {
+    activeScanCount--;
   }
 
   const [scan] = await db
@@ -60,6 +77,8 @@ router.post("/scan", async (req, res): Promise<void> => {
       categoryScores: result.categoryScores,
       issues: result.issues,
       fixPrompt: result.fixPrompt,
+      htmlHash: result.htmlHash,
+      responseHeadersSnapshot: result.responseHeadersSnapshot,
     })
     .returning();
 
@@ -67,7 +86,7 @@ router.post("/scan", async (req, res): Promise<void> => {
     CreateScanResponse.parse({
       ...scan,
       createdAt: scan.createdAt.toISOString(),
-    })
+    }),
   );
 });
 
@@ -96,17 +115,14 @@ router.get("/scans", async (req, res): Promise<void> => {
     ListScansResponse.parse({
       scans: scans.map((s) => ({ ...s, createdAt: s.createdAt.toISOString() })),
       total: Number(countResult[0]?.count ?? 0),
-    })
+    }),
   );
 });
 
 router.get("/scans/stats", async (req, res): Promise<void> => {
   const [allScans, recentScans] = await Promise.all([
     db
-      .select({
-        score: scansTable.score,
-        grade: scansTable.grade,
-      })
+      .select({ score: scansTable.score, grade: scansTable.grade })
       .from(scansTable),
     db
       .select({
@@ -122,7 +138,8 @@ router.get("/scans/stats", async (req, res): Promise<void> => {
   ]);
 
   const totalScans = allScans.length;
-  const averageScore = totalScans > 0 ? allScans.reduce((sum, s) => sum + s.score, 0) / totalScans : 0;
+  const averageScore =
+    totalScans > 0 ? allScans.reduce((sum, s) => sum + s.score, 0) / totalScans : 0;
   const gradeCounts: Record<string, number> = {};
   for (const s of allScans) {
     gradeCounts[s.grade] = (gradeCounts[s.grade] ?? 0) + 1;
@@ -134,7 +151,7 @@ router.get("/scans/stats", async (req, res): Promise<void> => {
       averageScore: Math.round(averageScore),
       gradeCounts,
       recentActivity: recentScans.map((s) => ({ ...s, createdAt: s.createdAt.toISOString() })),
-    })
+    }),
   );
 });
 
@@ -146,7 +163,10 @@ router.get("/scans/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [scan] = await db.select().from(scansTable).where(eq(scansTable.id, params.data.id));
+  const [scan] = await db
+    .select()
+    .from(scansTable)
+    .where(eq(scansTable.id, params.data.id));
 
   if (!scan) {
     res.status(404).json({ error: "Scan not found" });
@@ -157,7 +177,7 @@ router.get("/scans/:id", async (req, res): Promise<void> => {
     GetScanResponse.parse({
       ...scan,
       createdAt: scan.createdAt.toISOString(),
-    })
+    }),
   );
 });
 
@@ -169,7 +189,10 @@ router.delete("/scans/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [deleted] = await db.delete(scansTable).where(eq(scansTable.id, params.data.id)).returning();
+  const [deleted] = await db
+    .delete(scansTable)
+    .where(eq(scansTable.id, params.data.id))
+    .returning();
 
   if (!deleted) {
     res.status(404).json({ error: "Scan not found" });

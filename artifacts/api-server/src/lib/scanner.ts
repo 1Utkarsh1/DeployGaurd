@@ -1,4 +1,10 @@
 import { parse as parseHtml } from "node-html-parser";
+import { createHash } from "crypto";
+import { promises as dnsLookup } from "dns";
+
+// ============================================================
+// Constants
+// ============================================================
 
 const SECURITY_HEADERS = [
   "content-security-policy",
@@ -9,18 +15,58 @@ const SECURITY_HEADERS = [
   "strict-transport-security",
 ] as const;
 
-const PRIVATE_IP_RANGES = [
+const EVIDENCE_HEADERS = [
+  ...SECURITY_HEADERS,
+  "content-type",
+  "server",
+  "x-powered-by",
+  "cache-control",
+  "via",
+];
+
+// Private IPv4 ranges — loopback, RFC1918, link-local, CGNAT, test ranges
+const PRIVATE_IPV4_RE: RegExp[] = [
   /^127\./,
   /^10\./,
   /^192\.168\./,
   /^172\.(1[6-9]|2[0-9]|3[01])\./,
   /^169\.254\./,
-  /^::1$/,
-  /^fc00:/i,
-  /^fe80:/i,
+  /^0\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  /^192\.0\.2\./,
+  /^198\.51\.100\./,
+  /^203\.0\.113\./,
+  /^255\./,
 ];
 
-const BLOCKED_HOSTNAMES = ["localhost", "0.0.0.0", "metadata.google.internal", "169.254.169.254"];
+// Private IPv6 ranges — loopback, ULA, link-local, mapped
+const PRIVATE_IPV6_RE: RegExp[] = [
+  /^::1$/i,
+  /^::$/,
+  /^::ffff:/i,
+  /^64:ff9b:/i,
+  /^fc[0-9a-f]{2}:/i,
+  /^fd[0-9a-f]{2}:/i,
+  /^fe[89ab][0-9a-f]:/i,
+  /^2002:/i,
+];
+
+const BLOCKED_HOSTNAMES = new Set([
+  "localhost",
+  "0.0.0.0",
+  "metadata.google.internal",
+  "169.254.169.254",
+  "instance-data",
+]);
+
+const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_REDIRECTS = 5;
+const PER_HOP_TIMEOUT_MS = 8_000;
+const ABSOLUTE_TIMEOUT_MS = 30_000;
+
+// ============================================================
+// Types
+// ============================================================
 
 export interface ScanResult {
   url: string;
@@ -42,24 +88,40 @@ export interface ScanResult {
   htmlSizeKb: number;
   scriptTagCount: number;
   categoryScores: Array<{ name: string; score: number; maxScore: number; label: string }>;
-  issues: Array<{ category: string; severity: string; message: string; explanation: string; suggestion: string }>;
+  issues: Array<{
+    category: string;
+    severity: string;
+    message: string;
+    explanation: string;
+    suggestion: string;
+  }>;
   fixPrompt: string;
+  htmlHash: string;
+  responseHeadersSnapshot: Record<string, string>;
 }
 
-function normalizeUrl(input: string): string {
-  const trimmed = input.trim();
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed;
+// ============================================================
+// SSRF Protection — exported for tests
+// ============================================================
+
+/**
+ * Returns true if the given IP address falls within a private/non-routable range.
+ */
+export function isPrivateIp(address: string): boolean {
+  for (const re of PRIVATE_IPV4_RE) {
+    if (re.test(address)) return true;
   }
-  // Preserve any other explicit scheme (ftp://, file://, etc.) so validateSsrf
-  // can reject it cleanly with the right error message instead of garbling it.
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return trimmed;
+  for (const re of PRIVATE_IPV6_RE) {
+    if (re.test(address)) return true;
   }
-  return `https://${trimmed}`;
+  return false;
 }
 
-function validateSsrf(url: string): void {
+/**
+ * Synchronous SSRF guard: validates protocol, blocked hostnames, and IP literals.
+ * Does NOT resolve DNS — call validateSsrfAsync for full protection.
+ */
+export function validateSsrfSync(url: string): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -71,52 +133,245 @@ function validateSsrf(url: string): void {
     throw new Error("Only http and https protocols are allowed");
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // URL.hostname for IPv6 addresses includes brackets: "[::1]" → strip them
+  const raw = parsed.hostname.toLowerCase();
+  const hostname = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
 
-  if (BLOCKED_HOSTNAMES.includes(hostname)) {
+  if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new Error(`Blocked hostname: ${hostname}`);
   }
 
-  for (const pattern of PRIVATE_IP_RANGES) {
-    if (pattern.test(hostname)) {
-      throw new Error(`Blocked private IP range: ${hostname}`);
-    }
+  if (isPrivateIp(hostname)) {
+    throw new Error(`Blocked private IP range: ${hostname}`);
   }
 }
 
-function getResponseTimeBucket(ms: number): string {
-  if (ms < 300) return "fast";
-  if (ms < 1000) return "moderate";
-  if (ms < 3000) return "slow";
-  return "very slow";
-}
+/**
+ * Async SSRF guard: resolves the hostname to an IP address via the OS resolver,
+ * then validates the resolved IP. Prevents DNS-based SSRF bypasses.
+ */
+async function validateSsrfAsync(url: string): Promise<void> {
+  validateSsrfSync(url);
 
-async function fetchWithTimeout(url: string, timeoutMs = 8000, options: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const rawHostname = new URL(url).hostname.toLowerCase();
+  // Strip IPv6 brackets so IP literal detection works correctly
+  const hostname =
+    rawHostname.startsWith("[") && rawHostname.endsWith("]")
+      ? rawHostname.slice(1, -1)
+      : rawHostname;
+
+  // Skip DNS lookup for bare IP literals — already validated by validateSsrfSync
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(":")) {
+    return;
+  }
+
+  let address: string;
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+    const result = await dnsLookup.lookup(hostname, { family: 0 });
+    address = result.address;
+  } catch {
+    throw new Error(`Cannot resolve hostname: ${hostname}`);
+  }
+
+  if (isPrivateIp(address)) {
+    throw new Error(`Blocked: ${hostname} resolves to private IP ${address}`);
   }
 }
 
-async function checkFile(baseUrl: string, path: string): Promise<boolean> {
+// ============================================================
+// URL Normalization — exported for tests
+// ============================================================
+
+/**
+ * Prepends https:// to bare domains. Preserves explicit non-http(s) schemes so
+ * validateSsrfSync can reject them with the correct error message.
+ */
+export function normalizeUrl(input: string): string {
+  const trimmed = input.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+// ============================================================
+// HTTP Helpers
+// ============================================================
+
+/**
+ * Follows redirects manually up to maxRedirects, performing a full SSRF check
+ * on every redirect destination before following it.
+ */
+async function fetchWithManualRedirects(
+  initialUrl: string,
+  maxRedirects: number,
+  perHopTimeoutMs: number,
+  requestHeaders: Record<string, string>,
+  signal: AbortSignal,
+): Promise<{ response: Response; redirectChain: string[] }> {
+  const chain: string[] = [initialUrl];
+  let currentUrl = initialUrl;
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (signal.aborted) throw new Error("Scan timed out");
+
+    const hopController = new AbortController();
+    const hopTimer = setTimeout(() => hopController.abort(), perHopTimeoutMs);
+    const onParentAbort = (): void => hopController.abort();
+    signal.addEventListener("abort", onParentAbort, { once: true });
+
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        headers: requestHeaders,
+        signal: hopController.signal,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Request failed: ${msg}`);
+    } finally {
+      clearTimeout(hopTimer);
+      signal.removeEventListener("abort", onParentAbort);
+    }
+
+    // Non-redirect: return the final response
+    if (response.status < 300 || response.status >= 400) {
+      return { response, redirectChain: chain };
+    }
+
+    if (hop === maxRedirects) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Too many redirects (max ${maxRedirects})`);
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      return { response, redirectChain: chain };
+    }
+
+    await response.body?.cancel().catch(() => {});
+
+    const nextUrl = new URL(location, currentUrl).toString();
+    await validateSsrfAsync(nextUrl);
+
+    chain.push(nextUrl);
+    currentUrl = nextUrl;
+  }
+
+  throw new Error(`Too many redirects (max ${maxRedirects})`);
+}
+
+/**
+ * Reads the response body with a hard size cap. Body bytes beyond maxBytes are
+ * discarded and the connection is closed. Handles compressed content via fetch's
+ * built-in decompression (gzip, deflate, br).
+ */
+async function readBodyCapped(
+  response: Response,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
+    const text = await response.text();
+    return { text, truncated: false };
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let truncated = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+
+      const remaining = maxBytes - totalBytes;
+      if (value.length >= remaining) {
+        if (remaining > 0) chunks.push(value.subarray(0, remaining));
+        truncated = true;
+        break;
+      }
+
+      chunks.push(value);
+      totalBytes += value.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  const combined = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  return { text: combined.toString("utf8"), truncated };
+}
+
+async function checkFile(
+  baseUrl: string,
+  path: string,
+  signal: AbortSignal,
+): Promise<boolean> {
   try {
     const url = new URL(path, baseUrl).toString();
-    validateSsrf(url);
-    const res = await fetchWithTimeout(url, 4000, { method: "HEAD" });
-    return res.ok;
+    validateSsrfSync(url);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4_000);
+    const onAbort = (): void => controller.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      const res = await fetch(url, { method: "HEAD", signal: controller.signal });
+      return res.ok;
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
   } catch {
     return false;
   }
 }
 
-interface CookieAnalysis {
-  issues: string[];
+async function checkApiExposure(
+  baseUrl: string,
+  signal: AbortSignal,
+): Promise<{ paths: string[]; issues: string[] }> {
+  const pathsToCheck = ["/api", "/api/health", "/health", "/docs", "/swagger"];
+  const exposed: string[] = [];
+  const issues: string[] = [];
+
+  await Promise.all(
+    pathsToCheck.map(async (p) => {
+      try {
+        const url = new URL(p, baseUrl).toString();
+        validateSsrfSync(url);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3_000);
+        const onAbort = (): void => controller.abort();
+        signal.addEventListener("abort", onAbort, { once: true });
+        let res: Response;
+        try {
+          res = await fetch(url, { method: "GET", signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", onAbort);
+        }
+        if (res.ok) {
+          exposed.push(p);
+          if (p === "/docs" || p === "/swagger") {
+            const ct = res.headers.get("content-type") ?? "";
+            if (!ct.includes("text/html")) {
+              issues.push(`API docs exposed at ${p} — consider restricting access in production`);
+            }
+          }
+          await res.body?.cancel().catch(() => {});
+        }
+      } catch {
+        // ignore individual probe failures
+      }
+    }),
+  );
+
+  return { paths: exposed, issues };
 }
 
-function analyzeCookies(headers: Headers): CookieAnalysis {
+function analyzeCookies(headers: Headers): { issues: string[] } {
   const issues: string[] = [];
   const setCookieHeader = headers.get("set-cookie");
   if (!setCookieHeader) return { issues };
@@ -126,90 +381,88 @@ function analyzeCookies(headers: Headers): CookieAnalysis {
     const lower = cookie.toLowerCase();
     const nameMatch = cookie.match(/^([^=]+)=/);
     const name = nameMatch ? nameMatch[1].trim() : "unknown";
-
-    if (!lower.includes("httponly")) {
-      issues.push(`Cookie "${name}" is missing HttpOnly flag`);
-    }
-    if (!lower.includes("secure")) {
-      issues.push(`Cookie "${name}" is missing Secure flag`);
-    }
-    if (!lower.includes("samesite")) {
-      issues.push(`Cookie "${name}" is missing SameSite attribute`);
-    }
+    if (!lower.includes("httponly")) issues.push(`Cookie "${name}" is missing HttpOnly flag`);
+    if (!lower.includes("secure")) issues.push(`Cookie "${name}" is missing Secure flag`);
+    if (!lower.includes("samesite")) issues.push(`Cookie "${name}" is missing SameSite attribute`);
   }
 
   return { issues };
 }
 
-async function checkApiExposure(baseUrl: string): Promise<{ paths: string[]; issues: string[] }> {
-  const pathsToCheck = ["/api", "/api/health", "/health", "/docs", "/swagger"];
-  const exposed: string[] = [];
-  const issues: string[] = [];
-
-  await Promise.all(
-    pathsToCheck.map(async (p) => {
-      try {
-        const url = new URL(p, baseUrl).toString();
-        validateSsrf(url);
-        const res = await fetchWithTimeout(url, 3000, { method: "GET" });
-        if (res.ok) {
-          exposed.push(p);
-          if (p === "/docs" || p === "/swagger") {
-            // Only flag if the response is actually API docs (JSON/YAML), not an HTML SPA fallback
-            const contentType = res.headers.get("content-type") ?? "";
-            const isHtml = contentType.includes("text/html");
-            if (!isHtml) {
-              issues.push(`API docs exposed at ${p} — consider restricting access in production`);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-    })
-  );
-
-  return { paths: exposed, issues };
+function getResponseTimeBucket(ms: number): string {
+  if (ms < 300) return "fast";
+  if (ms < 1000) return "moderate";
+  if (ms < 3000) return "slow";
+  return "very slow";
 }
+
+// ============================================================
+// Main Scanner
+// ============================================================
 
 export async function scanUrl(rawUrl: string): Promise<ScanResult> {
   const normalizedUrl = normalizeUrl(rawUrl);
-  validateSsrf(normalizedUrl);
 
-  const redirectChain: string[] = [normalizedUrl];
+  // 1. Sync SSRF check (fast path — no I/O)
+  validateSsrfSync(normalizedUrl);
+
+  // 2. Async DNS-based SSRF check
+  await validateSsrfAsync(normalizedUrl);
+
+  // 3. Absolute timeout governs all subsequent I/O
+  const controller = new AbortController();
+  const absoluteTimer = setTimeout(() => controller.abort(), ABSOLUTE_TIMEOUT_MS);
+
+  try {
+    return await _scan(rawUrl, normalizedUrl, controller.signal);
+  } finally {
+    clearTimeout(absoluteTimer);
+  }
+}
+
+async function _scan(
+  rawUrl: string,
+  normalizedUrl: string,
+  signal: AbortSignal,
+): Promise<ScanResult> {
   const startTime = Date.now();
 
-  let response: Response;
-  try {
-    response = await fetchWithTimeout(normalizedUrl, 8000, {
-      redirect: "follow",
-      headers: {
-        "User-Agent": "DeployGuard/1.0 (Launch Readiness Scanner)",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to fetch URL: ${msg}`);
-  }
+  const requestHeaders: Record<string, string> = {
+    "User-Agent": "DeployGuard/1.0 (Launch Readiness Scanner)",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.5",
+  };
+
+  const { response, redirectChain } = await fetchWithManualRedirects(
+    normalizedUrl,
+    MAX_REDIRECTS,
+    PER_HOP_TIMEOUT_MS,
+    requestHeaders,
+    signal,
+  );
 
   const responseTimeMs = Date.now() - startTime;
-  const finalUrl = response.url || normalizedUrl;
-
-  // Track redirects
-  if (finalUrl !== normalizedUrl) {
-    redirectChain.push(finalUrl);
-  }
-
+  const finalUrl = redirectChain[redirectChain.length - 1] ?? normalizedUrl;
   const statusCode = response.status;
   const usesHttps = finalUrl.startsWith("https://");
 
-  // Parse HTML
-  const html = await response.text();
+  // Snapshot of security-relevant response headers (evidence the fetch happened)
+  const responseHeadersSnapshot: Record<string, string> = {};
+  for (const h of EVIDENCE_HEADERS) {
+    const val = response.headers.get(h);
+    if (val) responseHeadersSnapshot[h] = val;
+  }
+
+  // Read body with 2 MB cap; decompress is handled automatically by fetch
+  const { text: html } = await readBodyCapped(response, MAX_BODY_BYTES);
+
+  // SHA-256 fingerprint of the body — proof the page was actually fetched
+  const htmlHash = createHash("sha256").update(html).digest("hex").slice(0, 16);
+
   const htmlSizeKb = Buffer.byteLength(html, "utf8") / 1024;
   const root = parseHtml(html);
 
-  // SEO/Meta
   const titleEl = root.querySelector("title");
   const title = titleEl?.text?.trim() ?? null;
 
@@ -222,29 +475,30 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
   const ogTitleEl = root.querySelector('meta[property="og:title"]');
   const hasOpenGraph = !!ogTitleEl;
 
-  // Script count
   const scriptTagCount = root.querySelectorAll("script[src]").length;
 
-  // Security headers
   const securityHeaders: Record<string, boolean> = {};
   for (const header of SECURITY_HEADERS) {
     securityHeaders[header] = !!response.headers.get(header);
   }
 
-  // Cookies
   const { issues: cookieIssues } = analyzeCookies(response.headers);
 
-  // Robots/Sitemap
-  const [hasRobotsTxt, hasSitemapXml] = await Promise.all([
-    checkFile(finalUrl, "/robots.txt"),
-    checkFile(finalUrl, "/sitemap.xml"),
+  const [hasRobotsTxt, hasSitemapXml, apiExposure] = await Promise.all([
+    checkFile(finalUrl, "/robots.txt", signal),
+    checkFile(finalUrl, "/sitemap.xml", signal),
+    checkApiExposure(finalUrl, signal),
   ]);
 
-  // API exposure
-  const apiExposure = await checkApiExposure(finalUrl);
-
-  // --- SCORING ---
-  const issues: Array<{ category: string; severity: string; message: string; explanation: string; suggestion: string }> = [];
+  // ---- SCORING ----
+  type Issue = {
+    category: string;
+    severity: string;
+    message: string;
+    explanation: string;
+    suggestion: string;
+  };
+  const issues: Issue[] = [];
 
   // HTTPS & Redirects (15 pts)
   let httpsScore = 0;
@@ -262,7 +516,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
       category: "HTTPS & Redirects",
       severity: "critical",
       message: "Site does not use HTTPS",
-      explanation: "Your site is served over plain HTTP, which exposes users to eavesdropping and man-in-the-middle attacks.",
+      explanation: "Your site is served over plain HTTP, exposing users to eavesdropping and MITM attacks.",
       suggestion: "Enable HTTPS using a TLS certificate. Most hosts provide free certificates via Let's Encrypt.",
     });
   }
@@ -303,7 +557,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     },
     "x-frame-options": {
       explanation: "This header prevents your page from being embedded in iframes, protecting against clickjacking attacks.",
-      suggestion: 'Add X-Frame-Options: DENY or SAMEORIGIN to your server response headers.',
+      suggestion: "Add X-Frame-Options: DENY or SAMEORIGIN to your server response headers.",
     },
     "x-content-type-options": {
       explanation: "This header stops browsers from MIME-sniffing responses away from the declared content-type.",
@@ -311,7 +565,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     },
     "referrer-policy": {
       explanation: "Controls how much referrer information is sent with requests, protecting user privacy.",
-      suggestion: 'Add Referrer-Policy: strict-origin-when-cross-origin or no-referrer.',
+      suggestion: "Add Referrer-Policy: strict-origin-when-cross-origin or no-referrer.",
     },
     "permissions-policy": {
       explanation: "Allows you to control which browser APIs and features can be used on your page.",
@@ -395,7 +649,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
       category: "SEO",
       severity: "warning",
       message: `Meta description length is ${metaDescription.length} chars`,
-      explanation: "The meta description is outside the optimal 120-160 character range.",
+      explanation: "The meta description is outside the optimal 50-160 character range.",
       suggestion: "Adjust your meta description to be between 120-160 characters for best search snippet display.",
     });
   } else {
@@ -446,7 +700,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     });
   }
 
-  // Robots/Sitemap (10 pts)
+  // Robots & Sitemap (10 pts)
   let robotsScore = 0;
   if (hasRobotsTxt) {
     robotsScore += 5;
@@ -499,9 +753,6 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
         explanation: "Missing cookie security attributes can expose session tokens to XSS or network attacks.",
         suggestion: "Set HttpOnly, Secure, and SameSite=Lax (or Strict) on all cookies.",
       });
-    }
-    if (cookieIssues.length === 0) {
-      // Covered below
     }
   } else {
     issues.push({
@@ -632,17 +883,23 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     });
   }
 
-  // Calculate total score
+  // ---- TOTALS ----
   const totalScore = Math.min(
     100,
     Math.max(
       0,
-      httpsScore + securityScore + seoScore + robotsScore + cookieScore + perfScore + apiScore
-    )
+      httpsScore + securityScore + seoScore + robotsScore + cookieScore + perfScore + apiScore,
+    ),
   );
 
   const grade =
-    totalScore >= 85 ? "Excellent" : totalScore >= 70 ? "Good" : totalScore >= 50 ? "Needs Work" : "Risky";
+    totalScore >= 85
+      ? "Excellent"
+      : totalScore >= 70
+        ? "Good"
+        : totalScore >= 50
+          ? "Needs Work"
+          : "Risky";
 
   const categoryScores = [
     { name: "HTTPS & Redirects", score: Math.round(httpsScore), maxScore: 15, label: httpsScore >= 12 ? "Good" : httpsScore >= 8 ? "Fair" : "Poor" },
@@ -654,7 +911,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     { name: "API Exposure", score: Math.round(apiScore), maxScore: 5, label: apiScore >= 4 ? "Good" : apiScore >= 2 ? "Fair" : "Poor" },
   ];
 
-  // Generate fix prompt
+  // ---- FIX PROMPT ----
   const criticalIssues = issues.filter((i) => i.severity === "critical");
   const warningIssues = issues.filter((i) => i.severity === "warning");
 
@@ -703,5 +960,7 @@ export async function scanUrl(rawUrl: string): Promise<ScanResult> {
     categoryScores,
     issues,
     fixPrompt,
+    htmlHash,
+    responseHeadersSnapshot,
   };
 }
