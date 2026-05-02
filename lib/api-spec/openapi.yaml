@@ -307,6 +307,26 @@ components:
         hasNoindex:
           type: boolean
           description: Whether a meta robots noindex directive was found
+        structuredDataScore:
+          type: number
+          description: Structured data correctness score 0-5
+        thirdPartyScore:
+          type: number
+          description: Third-party governance score 0-10 (10 = no external scripts)
+        thirdPartyDomains:
+          type: array
+          items:
+            type: string
+          description: List of unique third-party script domains detected
+        aiOverlay:
+          $ref: "#/components/schemas/AiOverlayResult"
+          nullable: true
+          description: AI overlay score (present when LOCAL_AI=true, null otherwise)
+        enginesRan:
+          type: array
+          items:
+            type: string
+          description: Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai)
         mlOverlay:
           $ref: "#/components/schemas/MlOverlayResult"
           description: Optional ML/rule-based grade adjustment (absent when not computed)
@@ -340,6 +360,10 @@ components:
         - hasStructuredData
         - hasNoindex
         - corsScore
+        - structuredDataScore
+        - thirdPartyScore
+        - thirdPartyDomains
+        - enginesRan
         - createdAt
 
     ScanSummary:
@@ -403,6 +427,32 @@ components:
           type: boolean
       required:
         - success
+
+    AiOverlayResult:
+      type: object
+      description: AI overlay score (feature gated via LOCAL_AI=true)
+      properties:
+        aiScore:
+          type: number
+          description: AI-evaluated launch-readiness score 0-100
+        confidence:
+          type: number
+          description: Model confidence 0-1
+        rationale:
+          type: string
+          description: One-sentence explanation of the AI score
+        riskLabel:
+          type: string
+          description: '"Low" | "Moderate" | "High" | "Critical"'
+        engineUsed:
+          type: string
+          description: '"deterministic-rules" | "local-llm" | "none"'
+      required:
+        - aiScore
+        - confidence
+        - rationale
+        - riskLabel
+        - engineUsed
 
     MlOverlayResult:
       type: object

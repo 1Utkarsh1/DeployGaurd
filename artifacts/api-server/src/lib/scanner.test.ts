@@ -12,6 +12,9 @@ import {
   headlessScan,
 } from "./scanner.js";
 import { computeMlOverlay, buildFeatureVector } from "./ml-overlay.js";
+import { scoreStructuredData } from "./structured-data.js";
+import { scoreThirdPartyGovernance } from "./third-party.js";
+import { computeAiOverlay } from "./ai-overlay.js";
 
 // ============================================================
 // normalizeUrl
@@ -624,5 +627,238 @@ describe("computeMlOverlay", () => {
     });
     expect(features.criticalCount).toBe(2);
     expect(features.warningCount).toBe(1);
+  });
+
+  it("buildFeatureVector defaults thirdPartyScore to 10 when not supplied", () => {
+    const features = buildFeatureVector({
+      httpsScore: 10, securityScore: 28, corsScore: 10, cookieScore: 15,
+      cacheScore: 7, perfScore: 14, seoScore: 6, a11yScore: 5,
+      totalScore: 95, issues: [], cookieCount: 0,
+      hasCSP: true, hasHSTS: true, usesHttps: true, hasCriticalCors: false, hasNoindex: false,
+    });
+    expect(features.thirdPartyScore).toBe(10);
+  });
+
+  it("buildFeatureVector defaults structuredDataScore to 0 when not supplied", () => {
+    const features = buildFeatureVector({
+      httpsScore: 10, securityScore: 28, corsScore: 10, cookieScore: 15,
+      cacheScore: 7, perfScore: 14, seoScore: 6, a11yScore: 5,
+      totalScore: 95, issues: [], cookieCount: 0,
+      hasCSP: true, hasHSTS: true, usesHttps: true, hasCriticalCors: false, hasNoindex: false,
+    });
+    expect(features.structuredDataScore).toBe(0);
+  });
+
+  it("buildFeatureVector stores thirdPartyScore and structuredDataScore when provided", () => {
+    const features = buildFeatureVector({
+      httpsScore: 10, securityScore: 28, corsScore: 10, cookieScore: 15,
+      cacheScore: 7, perfScore: 14, seoScore: 6, a11yScore: 5,
+      thirdPartyScore: 7, structuredDataScore: 4,
+      totalScore: 85, issues: [], cookieCount: 0,
+      hasCSP: true, hasHSTS: true, usesHttps: true, hasCriticalCors: false, hasNoindex: false,
+    });
+    expect(features.thirdPartyScore).toBe(7);
+    expect(features.structuredDataScore).toBe(4);
+  });
+});
+
+// ============================================================
+// scoreStructuredData
+// ============================================================
+
+describe("scoreStructuredData", () => {
+  it("scores 0 when no JSON-LD is present", () => {
+    const r = scoreStructuredData("<html><body><p>Hello</p></body></html>");
+    expect(r.score).toBe(0);
+    expect(r.blockCount).toBe(0);
+    expect(r.validBlockCount).toBe(0);
+    expect(r.issues.some((i) => i.severity === "info")).toBe(true);
+  });
+
+  it("scores 5 for a perfect JSON-LD Organization block", () => {
+    const html = `<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Acme","url":"https://acme.com"}</script>`;
+    const r = scoreStructuredData(html);
+    expect(r.score).toBe(5);
+    expect(r.blockCount).toBe(1);
+    expect(r.validBlockCount).toBe(1);
+  });
+
+  it("deducts 1pt for missing @context", () => {
+    const html = `<script type="application/ld+json">{"@type":"Organization","name":"Acme","url":"https://acme.com"}</script>`;
+    const r = scoreStructuredData(html);
+    expect(r.score).toBeLessThan(5);
+    expect(r.penalties.some((p) => p.message.includes("@context"))).toBe(true);
+  });
+
+  it("deducts 1pt for missing @type", () => {
+    const html = `<script type="application/ld+json">{"@context":"https://schema.org","name":"Acme"}</script>`;
+    const r = scoreStructuredData(html);
+    expect(r.score).toBeLessThan(5);
+    expect(r.penalties.some((p) => p.message.includes("@type"))).toBe(true);
+  });
+
+  it("deducts 2pts for malformed JSON", () => {
+    const html = `<script type="application/ld+json">{invalid json here}</script>`;
+    const r = scoreStructuredData(html);
+    expect(r.score).toBeLessThanOrEqual(3);
+    expect(r.penalties.some((p) => p.pointsLost === 2)).toBe(true);
+  });
+
+  it("score is always in range 0-5", () => {
+    const html = `<script type="application/ld+json">{bad}{also bad}</script><script type="application/ld+json">{again bad}</script>`;
+    const r = scoreStructuredData(html);
+    expect(r.score).toBeGreaterThanOrEqual(0);
+    expect(r.score).toBeLessThanOrEqual(5);
+  });
+});
+
+// ============================================================
+// scoreThirdPartyGovernance
+// ============================================================
+
+describe("scoreThirdPartyGovernance", () => {
+  it("scores 10 when no scripts are present", () => {
+    const r = scoreThirdPartyGovernance("<html><body></body></html>", "https://example.com");
+    expect(r.score).toBe(10);
+    expect(r.thirdPartyScripts).toBe(0);
+  });
+
+  it("scores 10 when all scripts are same-origin", () => {
+    const html = `<script src="/js/app.js"></script><script src="https://example.com/lib.js"></script>`;
+    const r = scoreThirdPartyGovernance(html, "https://example.com");
+    expect(r.score).toBe(10);
+    expect(r.thirdPartyScripts).toBe(0);
+  });
+
+  it("deducts points for third-party scripts from known CDN", () => {
+    const html = `<script src="https://cdn.jsdelivr.net/npm/axios.min.js"></script>`;
+    const r = scoreThirdPartyGovernance(html, "https://example.com");
+    expect(r.thirdPartyScripts).toBe(1);
+    expect(r.score).toBeLessThan(10);
+    expect(r.unknownDomains).not.toContain("cdn.jsdelivr.net");
+  });
+
+  it("adds unknown domain penalty for unrecognized script source", () => {
+    const html = `<script src="https://unknown-analytics.io/track.js"></script>`;
+    const r = scoreThirdPartyGovernance(html, "https://example.com");
+    expect(r.thirdPartyScripts).toBe(1);
+    expect(r.unknownDomains).toContain("unknown-analytics.io");
+    expect(r.thirdPartyDomains).toContain("unknown-analytics.io");
+  });
+
+  it("score is always in range 0-10", () => {
+    const manyScripts = Array.from({ length: 30 }, (_, i) =>
+      `<script src="https://thirdparty${i}.io/track.js"></script>`
+    ).join("");
+    const r = scoreThirdPartyGovernance(manyScripts, "https://example.com");
+    expect(r.score).toBeGreaterThanOrEqual(0);
+    expect(r.score).toBeLessThanOrEqual(10);
+  });
+
+  it("counts correct thirdPartyDomains list", () => {
+    const html = `
+      <script src="https://fonts.googleapis.com/font.js"></script>
+      <script src="https://cdn.jsdelivr.net/lib.js"></script>
+      <script src="https://malicious-tracker.io/t.js"></script>
+    `;
+    const r = scoreThirdPartyGovernance(html, "https://example.com");
+    expect(r.thirdPartyDomains).toContain("fonts.googleapis.com");
+    expect(r.thirdPartyDomains).toContain("cdn.jsdelivr.net");
+    expect(r.thirdPartyDomains).toContain("malicious-tracker.io");
+    expect(r.thirdPartyDomains.length).toBe(3);
+  });
+});
+
+// ============================================================
+// computeAiOverlay — feature gate (LOCAL_AI env)
+// ============================================================
+
+describe("computeAiOverlay", () => {
+  const features = buildFeatureVector({
+    httpsScore: 10,
+    securityScore: 28,
+    corsScore: 10,
+    cookieScore: 10,
+    cacheScore: 5,
+    perfScore: 8,
+    seoScore: 6,
+    a11yScore: 5,
+    thirdPartyScore: 10,
+    structuredDataScore: 3,
+    totalScore: 90,
+    issues: [],
+    cookieCount: 0,
+    hasCSP: true,
+    hasHSTS: true,
+    usesHttps: true,
+    hasCriticalCors: false,
+    hasNoindex: false,
+  });
+
+  it("returns null when LOCAL_AI is not set (default off)", async () => {
+    delete process.env.LOCAL_AI;
+    const result = await computeAiOverlay(features, []);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when LOCAL_AI=false", async () => {
+    process.env.LOCAL_AI = "false";
+    const result = await computeAiOverlay(features, []);
+    expect(result).toBeNull();
+    delete process.env.LOCAL_AI;
+  });
+
+  it("returns an AiOverlayResult (deterministic fallback) when LOCAL_AI=true and no model", async () => {
+    process.env.LOCAL_AI = "true";
+    delete process.env.LOCAL_AI_MODEL_PATH;
+    const result = await computeAiOverlay(features, ["[Security] Missing CSP (-5 pts)"]);
+    expect(result).not.toBeNull();
+    expect(result!.aiScore).toBeGreaterThanOrEqual(0);
+    expect(result!.aiScore).toBeLessThanOrEqual(100);
+    expect(["Low", "Moderate", "High", "Critical"]).toContain(result!.riskLabel);
+    expect(result!.rationale).toBeTruthy();
+    expect(result!.engineUsed).toBe("deterministic-rules");
+    delete process.env.LOCAL_AI;
+  });
+
+  it("sets riskLabel Low for high-scoring site", async () => {
+    process.env.LOCAL_AI = "true";
+    delete process.env.LOCAL_AI_MODEL_PATH;
+    const result = await computeAiOverlay(features, []);
+    expect(result!.riskLabel).toBe("Low");
+    delete process.env.LOCAL_AI;
+  });
+
+  it("sets riskLabel Critical for HTTP site with many critical issues", async () => {
+    process.env.LOCAL_AI = "true";
+    delete process.env.LOCAL_AI_MODEL_PATH;
+    const badFeatures = buildFeatureVector({
+      httpsScore: 0,
+      securityScore: 0,
+      corsScore: 0,
+      cookieScore: 0,
+      cacheScore: 0,
+      perfScore: 0,
+      seoScore: 0,
+      a11yScore: 0,
+      thirdPartyScore: 0,
+      structuredDataScore: 0,
+      totalScore: 0,
+      issues: [
+        { severity: "critical", category: "HTTPS & Redirects" },
+        { severity: "critical", category: "Security Headers" },
+        { severity: "critical", category: "CORS" },
+        { severity: "critical", category: "Cookies" },
+      ],
+      cookieCount: 5,
+      hasCSP: false,
+      hasHSTS: false,
+      usesHttps: false,
+      hasCriticalCors: true,
+      hasNoindex: true,
+    });
+    const result = await computeAiOverlay(badFeatures, []);
+    expect(result!.riskLabel).toBe("Critical");
+    delete process.env.LOCAL_AI;
   });
 });

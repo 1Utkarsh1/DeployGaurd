@@ -55,23 +55,77 @@ export function ScanResults({ result }: { result: ScanResult }) {
   const criticalCount = result.issues.filter((i) => i.severity === "critical").length;
   const warningCount = result.issues.filter((i) => i.severity === "warning").length;
 
+  const engineLabels: Record<string, string> = {
+    "structured-data": "🔗 Structured Data",
+    "third-party": "📊 Third-party",
+    "headless": "🔬 Headless",
+    "local-ai": "🤖 Local AI",
+  };
+
+  const aiOverlay = (result as { aiOverlay?: { aiScore: number; riskLabel: string; rationale: string; confidence: number; engineUsed: string } | null }).aiOverlay;
+  const enginesRan = (result as { enginesRan?: string[] }).enginesRan ?? [];
+  const thirdPartyDomains = (result as { thirdPartyDomains?: string[] }).thirdPartyDomains ?? [];
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+
+      {/* Engine Badges */}
+      {enginesRan.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">Engines:</span>
+          {enginesRan.map((engine) => (
+            <Badge
+              key={engine}
+              variant="outline"
+              className="text-xs px-2 py-0.5 font-mono border-primary/30 text-primary/80"
+            >
+              {engineLabels[engine] ?? engine}
+            </Badge>
+          ))}
+        </div>
+      )}
+
       {/* Top row: Score + Quick Stats */}
       <div className="flex flex-col md:flex-row gap-6 items-start md:items-stretch">
-        {/* Score Card */}
+        {/* Score Card — Core + AI side by side when AI overlay present */}
         <Card className="w-full md:w-auto shrink-0 bg-card border-card-border overflow-hidden relative">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
-          <CardContent className="p-8 flex flex-col items-center justify-center min-w-[240px] h-full">
-            <div className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">Final Score</div>
-            <div className={`text-8xl font-bold tracking-tighter tabular-nums ${getScoreColor(result.score)}`}>
-              {result.score}
-            </div>
+          <CardContent className={`p-8 flex flex-col items-center justify-center h-full ${aiOverlay ? "min-w-[340px]" : "min-w-[240px]"}`}>
+            {aiOverlay ? (
+              <div className="flex gap-8 items-center w-full justify-center">
+                <div className="flex flex-col items-center">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Core</div>
+                  <div className={`text-7xl font-bold tracking-tighter tabular-nums ${getScoreColor(result.score)}`}>
+                    {result.score}
+                  </div>
+                </div>
+                <div className="w-px h-20 bg-border" />
+                <div className="flex flex-col items-center">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">AI</div>
+                  <div className={`text-7xl font-bold tracking-tighter tabular-nums ${getScoreColor(aiOverlay.aiScore)}`}>
+                    {aiOverlay.aiScore}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{aiOverlay.riskLabel}</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">Final Score</div>
+                <div className={`text-8xl font-bold tracking-tighter tabular-nums ${getScoreColor(result.score)}`}>
+                  {result.score}
+                </div>
+              </>
+            )}
             <div className="mt-4">
               <Badge variant="outline" className="text-base px-4 py-1 font-semibold uppercase tracking-widest border-2">
                 {result.grade}
               </Badge>
             </div>
+            {aiOverlay && (
+              <div className="mt-3 text-xs text-muted-foreground text-center max-w-[280px] italic leading-relaxed">
+                {aiOverlay.rationale}
+              </div>
+            )}
             <div className="mt-4 flex gap-3 text-sm">
               {criticalCount > 0 && (
                 <span className="text-destructive font-medium">{criticalCount} critical</span>
@@ -215,6 +269,26 @@ export function ScanResults({ result }: { result: ScanResult }) {
           })}
         </div>
       </div>
+
+      {/* Third-party Domains */}
+      {thirdPartyDomains.length > 0 && (
+        <div>
+          <h3 className="text-lg font-semibold mb-3 text-muted-foreground uppercase tracking-wider">
+            Third-party Script Domains ({thirdPartyDomains.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {thirdPartyDomains.map((domain) => (
+              <Badge
+                key={domain}
+                variant="outline"
+                className="text-xs font-mono px-2 py-1 border-warning/40 text-warning-foreground/80"
+              >
+                {domain}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Detailed Findings */}
       <div className="space-y-6">

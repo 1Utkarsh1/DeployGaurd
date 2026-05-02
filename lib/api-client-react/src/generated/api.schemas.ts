@@ -65,6 +65,22 @@ export type ScanResultSecurityHeaders = { [key: string]: boolean };
  */
 export type ScanResultResponseHeadersSnapshot = { [key: string]: string };
 
+/**
+ * AI overlay score (feature gated via LOCAL_AI=true)
+ */
+export interface AiOverlayResult {
+  /** AI-evaluated launch-readiness score 0-100 */
+  aiScore: number;
+  /** Model confidence 0-1 */
+  confidence: number;
+  /** One-sentence explanation of the AI score */
+  rationale: string;
+  /** "Low" | "Moderate" | "High" | "Critical" */
+  riskLabel: string;
+  /** "deterministic-rules" | "local-llm" | "none" */
+  engineUsed: string;
+}
+
 export type MlOverlayResultFeatureImportanceItem = {
   feature: string;
   contribution: number;
@@ -120,6 +136,16 @@ export interface ScanResult {
   hasStructuredData: boolean;
   /** Whether a meta robots noindex directive was found */
   hasNoindex: boolean;
+  /** Structured data correctness score 0-5 */
+  structuredDataScore: number;
+  /** Third-party governance score 0-10 (10 = no external scripts) */
+  thirdPartyScore: number;
+  /** List of unique third-party script domains detected */
+  thirdPartyDomains: string[];
+  /** AI overlay score (present when LOCAL_AI=true, null otherwise) */
+  aiOverlay?: AiOverlayResult | null;
+  /** Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai) */
+  enginesRan: string[];
   /** Optional ML/rule-based grade adjustment (absent when not computed) */
   mlOverlay?: MlOverlayResult;
   createdAt: string;

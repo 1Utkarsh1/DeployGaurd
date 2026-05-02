@@ -1,6 +1,14 @@
 import { parse as parseHtml } from "node-html-parser";
 import { createHash } from "crypto";
 import { promises as dnsPromises } from "dns";
+import { scoreStructuredData } from "./structured-data.js";
+import { scoreThirdPartyGovernance } from "./third-party.js";
+import { headlessScan as _headlessScan } from "./headless.js";
+import { computeAiOverlay, type AiOverlayResult } from "./ai-overlay.js";
+import { buildFeatureVector } from "./ml-overlay.js";
+
+export { headlessScan } from "./headless.js";
+export type { HeadlessResult } from "./headless.js";
 
 // ================================================================
 // Constants
@@ -124,6 +132,11 @@ export interface ScanResult {
   canonicalUrl: string | null;
   hasStructuredData: boolean;
   hasNoindex: boolean;
+  structuredDataScore: number;
+  thirdPartyScore: number;
+  thirdPartyDomains: string[];
+  aiOverlay: AiOverlayResult | null;
+  enginesRan: string[];
 }
 
 // ================================================================
@@ -948,7 +961,7 @@ function scoreCookies(
       explanation: "No Set-Cookie headers were found in the response.",
       suggestion: "When you add cookies, set Secure, HttpOnly, and SameSite=Lax on all of them.",
     });
-    return { score: 15, issues, penalties, cookieIssueStrings };
+    return { score: 10, issues, penalties, cookieIssueStrings };
   }
 
   let deduction = 0;
@@ -1053,7 +1066,7 @@ function scoreCookies(
     }
   }
 
-  return { score: Math.max(0, 15 - deduction), issues, penalties, cookieIssueStrings };
+  return { score: Math.max(0, 10 - deduction), issues, penalties, cookieIssueStrings };
 }
 
 function scoreCacheHygiene(
@@ -1064,7 +1077,7 @@ function scoreCacheHygiene(
   const issues: Issue[] = [];
   const penalties: Penalty[] = [];
   const CAT = "Cache & Exposure";
-  let score = 7;
+  let score = 5;
 
   const server = headers.get("server");
   const xPoweredBy = headers.get("x-powered-by");
@@ -1125,8 +1138,8 @@ function scoreCacheHygiene(
 
   if (apiExposure.issues.length > 0) {
     for (const issue of apiExposure.issues) {
-      score -= 2;
-      penalties.push({ category: CAT, message: issue, pointsLost: 2 });
+      score -= 1;
+      penalties.push({ category: CAT, message: issue, pointsLost: 1 });
       issues.push({ category: CAT, severity: "warning",
         message: issue,
         explanation: "Exposing API documentation or health endpoints publicly aids attacker reconnaissance.",
@@ -1159,10 +1172,10 @@ function scorePerformance(
     !cacheControl.includes("no-cache");
   const cacheMultiplier = hasStrongCache ? 0.8 : 1.0;
 
-  const timePenalty = Math.round(penaltyCurve(responseTimeMs, 300, 5, 2000) * cacheMultiplier * 100) / 100;
-  const sizePenalty = Math.round(penaltyCurve(htmlSizeKb, 250, 5, 2048) * cacheMultiplier * 100) / 100;
-  const scriptPenalty = Math.round(penaltyCurve(scriptTagCount, 10, 5, 60) * cacheMultiplier * 100) / 100;
-  const score = Math.max(0, Math.round((15 - timePenalty - sizePenalty - scriptPenalty) * 10) / 10);
+  const timePenalty = Math.round(penaltyCurve(responseTimeMs, 300, 3, 2000) * cacheMultiplier * 100) / 100;
+  const sizePenalty = Math.round(penaltyCurve(htmlSizeKb, 250, 2, 2048) * cacheMultiplier * 100) / 100;
+  const scriptPenalty = Math.round(penaltyCurve(scriptTagCount, 10, 3, 60) * cacheMultiplier * 100) / 100;
+  const score = Math.max(0, Math.round((8 - timePenalty - sizePenalty - scriptPenalty) * 10) / 10);
 
   if (timePenalty === 0) {
     issues.push({ category: CAT, severity: "passed",
@@ -1421,7 +1434,7 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
   const issues: Issue[] = [];
   const penalties: Penalty[] = [];
   const CAT = "Accessibility";
-  let score = 6;
+  let score = 5;
 
   // Inputs without accessible labels (2pts)
   const inputs = root.querySelectorAll(
@@ -1515,48 +1528,7 @@ function scoreAccessibility(root: ReturnType<typeof parseHtml>): {
 // Headless Scan Module (feature-gated)
 // ================================================================
 
-/**
- * Result from an optional headless browser scan.
- * Available only when HEADLESS_SCAN=true and @playwright/test is installed.
- */
-export interface HeadlessResult {
-  available: boolean;
-  renderBlockingCount: number | null;
-  totalResourceCount: number | null;
-  lcpMs: number | null;
-  axeViolationCount: number | null;
-  error?: string;
-}
-
-/**
- * Feature-gated headless scan. Returns null when headless mode is disabled (default).
- *
- * Enable with environment variable: HEADLESS_SCAN=true
- * Requires: @playwright/test to be installed
- *
- * When enabled, this will:
- *   1. Launch a headless Chromium browser via Playwright
- *   2. Collect render-blocking resource counts via window.performance
- *   3. Count total network requests
- *   4. Approximate LCP via PerformanceObserver
- *   5. Run axe-core for WCAG violation detection
- *
- * Stub interface — deterministic score remains the primary result.
- * This overlay is additive and non-destructive.
- */
-export async function headlessScan(_url: string): Promise<HeadlessResult | null> {
-  if (process.env.HEADLESS_SCAN !== "true") {
-    return null;
-  }
-  return {
-    available: false,
-    renderBlockingCount: null,
-    totalResourceCount: null,
-    lcpMs: null,
-    axeViolationCount: null,
-    error: "Headless scan stub: install @playwright/test and implement the Playwright integration to enable.",
-  };
-}
+// HeadlessResult and headlessScan are re-exported from ./headless.ts (see top of file)
 
 // ================================================================
 // Auxiliary HTTP Checks
@@ -1769,14 +1741,24 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
   allIssues.push(...seoR.issues);
   allPenalties.push(...seoR.penalties);
 
-  // Accessibility (6pts: inputs 2 + images 2 + main/headings 1 + lang 1)
+  // Accessibility (5pts: inputs 2 + images 2 + main/headings 1)
   const a11yR = scoreAccessibility(root);
   allIssues.push(...a11yR.issues);
   allPenalties.push(...a11yR.penalties);
 
-  // ---- Final totals (10+30+15+10+7+15+7+6 = 100) ----
+  // Structured Data (5pts)
+  const sdR = scoreStructuredData(html);
+  allIssues.push(...sdR.issues);
+  allPenalties.push(...sdR.penalties);
+
+  // Third-party Governance (10pts)
+  const tpR = scoreThirdPartyGovernance(html, finalUrl);
+  allIssues.push(...tpR.issues);
+  allPenalties.push(...tpR.penalties);
+
+  // ---- Final totals (10+30+10+10+10+5+8+7+5+5 = 100) ----
   const totalScore = Math.min(100, Math.max(0, Math.round(
-    httpsScore + securityScore + cookieR.score + corsR.score + cacheR.score + perfR.score + seoR.score + a11yR.score,
+    httpsScore + securityScore + cookieR.score + corsR.score + tpR.score + cacheR.score + perfR.score + seoR.score + sdR.score + a11yR.score,
   )));
 
   const grade =
@@ -1797,20 +1779,61 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
   const categoryScores = [
     { name: "HTTPS & Redirects", score: httpsScore, maxScore: 10, label: httpsScore >= 8 ? "Good" : httpsScore >= 5 ? "Fair" : "Poor" },
     { name: "Security Headers", score: Math.round(securityScore * 10) / 10, maxScore: 30, label: securityScore >= 24 ? "Good" : securityScore >= 15 ? "Fair" : "Poor" },
-    { name: "Cookies & Session", score: cookieR.score, maxScore: 15, label: cookieR.score >= 12 ? "Good" : cookieR.score >= 7 ? "Fair" : "Poor" },
+    { name: "Cookies & Session", score: cookieR.score, maxScore: 10, label: cookieR.score >= 8 ? "Good" : cookieR.score >= 5 ? "Fair" : "Poor" },
     { name: "CORS", score: Math.round(corsR.score * 10) / 10, maxScore: 10, label: corsR.score >= 8 ? "Good" : corsR.score >= 5 ? "Fair" : "Poor" },
-    { name: "Cache & Exposure", score: cacheR.score, maxScore: 7, label: cacheR.score >= 5 ? "Good" : cacheR.score >= 3 ? "Fair" : "Poor" },
-    { name: "Performance", score: Math.round(perfR.score * 10) / 10, maxScore: 15, label: perfR.score >= 12 ? "Good" : perfR.score >= 8 ? "Fair" : "Poor" },
+    { name: "Third-party", score: tpR.score, maxScore: 10, label: tpR.score >= 8 ? "Good" : tpR.score >= 5 ? "Fair" : "Poor" },
+    { name: "Cache & Exposure", score: cacheR.score, maxScore: 5, label: cacheR.score >= 4 ? "Good" : cacheR.score >= 2 ? "Fair" : "Poor" },
+    { name: "Performance", score: Math.round(perfR.score * 10) / 10, maxScore: 8, label: perfR.score >= 6 ? "Good" : perfR.score >= 4 ? "Fair" : "Poor" },
     { name: "SEO", score: Math.round(seoR.score * 10) / 10, maxScore: 7, label: seoR.score >= 5.6 ? "Good" : seoR.score >= 3.5 ? "Fair" : "Poor" },
-    { name: "Accessibility", score: a11yR.score, maxScore: 6, label: a11yR.score >= 5 ? "Good" : a11yR.score >= 3 ? "Fair" : "Poor" },
+    { name: "Structured Data", score: Math.round(sdR.score * 10) / 10, maxScore: 5, label: sdR.score >= 4 ? "Good" : sdR.score >= 2 ? "Fair" : "Poor" },
+    { name: "Accessibility", score: a11yR.score, maxScore: 5, label: a11yR.score >= 4 ? "Good" : a11yR.score >= 2 ? "Fair" : "Poor" },
   ];
 
   const criticalIssues = allIssues.filter((i) => i.severity === "critical");
   const warningIssues = allIssues.filter((i) => i.severity === "warning");
 
-  let fixPrompt = `# DeployGuard Report — ${finalUrl}\n\nScore: ${totalScore}/100 (${grade})\n\nTop Score Killers:\n`;
+  // ---- Post-score optional engines (run in parallel) ----
+  const featureVector = buildFeatureVector({
+    httpsScore,
+    securityScore,
+    corsScore: corsR.score,
+    cookieScore: cookieR.score,
+    cacheScore: cacheR.score,
+    perfScore: perfR.score,
+    seoScore: seoR.score,
+    a11yScore: a11yR.score,
+    thirdPartyScore: tpR.score,
+    structuredDataScore: sdR.score,
+    totalScore,
+    issues: allIssues,
+    cookieCount: cookieR.cookieIssueStrings.length,
+    hasCSP: securityHeaders["content-security-policy"] ?? false,
+    hasHSTS: securityHeaders["strict-transport-security"] ?? false,
+    usesHttps,
+    hasCriticalCors: corsR.score <= 2,
+    hasNoindex: seoR.hasNoindex,
+  });
+
+  const topFindings = scoreKillers.map(
+    (k) => `[${k.category}] ${k.message} (−${k.pointsLost} pts)`,
+  );
+
+  const [headlessR, aiOverlay] = await Promise.all([
+    _headlessScan(finalUrl),
+    computeAiOverlay(featureVector, topFindings),
+  ]);
+
+  const enginesRan: string[] = ["structured-data", "third-party"];
+  if (headlessR?.available) enginesRan.push("headless");
+  if (aiOverlay) enginesRan.push("local-ai");
+
+  // ---- Fix prompt ----
+  let fixPrompt = `# DeployGuard Report (v4) — ${finalUrl}\n\nScore: ${totalScore}/100 (${grade})\nRubric: HTTPS(10) + Security(30) + Cookies(10) + CORS(10) + Third-party(10) + Cache(5) + Perf(8) + SEO(7) + StructuredData(5) + A11y(5) = 100\n\nTop Score Killers:\n`;
   for (const k of scoreKillers) {
     fixPrompt += `  • [${k.category}] ${k.message} (−${k.pointsLost} pts)\n`;
+  }
+  if (aiOverlay) {
+    fixPrompt += `\nAI Overlay Score: ${aiOverlay.aiScore}/100 (${aiOverlay.riskLabel}) — ${aiOverlay.rationale}\n`;
   }
   if (criticalIssues.length > 0) {
     fixPrompt += `\n## Critical Issues — Fix Before Launch\n`;
@@ -1824,7 +1847,7 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
       fixPrompt += `\n### ${i.message}\nWhy: ${i.explanation}\nFix: ${i.suggestion}\n`;
     }
   }
-  fixPrompt += `\nGenerated by DeployGuard v2.0`;
+  fixPrompt += `\nGenerated by DeployGuard v4.0 | Engines: ${enginesRan.join(", ")}`;
 
   return {
     url: rawUrl,
@@ -1853,7 +1876,12 @@ async function _scan(rawUrl: string, normalizedUrl: string, signal: AbortSignal)
     corsScore: corsR.score,
     scoreKillers,
     canonicalUrl: seoR.canonicalUrl,
-    hasStructuredData: seoR.hasStructuredData,
+    hasStructuredData: seoR.hasStructuredData || sdR.blockCount > 0,
     hasNoindex: seoR.hasNoindex,
+    structuredDataScore: sdR.score,
+    thirdPartyScore: tpR.score,
+    thirdPartyDomains: tpR.thirdPartyDomains,
+    aiOverlay: aiOverlay ?? null,
+    enginesRan,
   };
 }

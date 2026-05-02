@@ -92,6 +92,38 @@ export const CreateScanResponse = zod.object({
   hasNoindex: zod
     .boolean()
     .describe("Whether a meta robots noindex directive was found"),
+  structuredDataScore: zod
+    .number()
+    .describe("Structured data correctness score 0-5"),
+  thirdPartyScore: zod
+    .number()
+    .describe("Third-party governance score 0-10 (10 = no external scripts)"),
+  thirdPartyDomains: zod
+    .array(zod.string())
+    .describe("List of unique third-party script domains detected"),
+  aiOverlay: zod
+    .object({
+      aiScore: zod
+        .number()
+        .describe("AI-evaluated launch-readiness score 0-100"),
+      confidence: zod.number().describe("Model confidence 0-1"),
+      rationale: zod
+        .string()
+        .describe("One-sentence explanation of the AI score"),
+      riskLabel: zod
+        .string()
+        .describe('\"Low\" | \"Moderate\" | \"High\" | \"Critical\"'),
+      engineUsed: zod
+        .string()
+        .describe('\"deterministic-rules\" | \"local-llm\" | \"none\"'),
+    })
+    .nullish()
+    .describe("AI overlay score (present when LOCAL_AI=true, null otherwise)"),
+  enginesRan: zod
+    .array(zod.string())
+    .describe(
+      "Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai)",
+    ),
   mlOverlay: zod
     .object({
       adjustedGrade: zod
@@ -216,6 +248,38 @@ export const GetScanResponse = zod.object({
   hasNoindex: zod
     .boolean()
     .describe("Whether a meta robots noindex directive was found"),
+  structuredDataScore: zod
+    .number()
+    .describe("Structured data correctness score 0-5"),
+  thirdPartyScore: zod
+    .number()
+    .describe("Third-party governance score 0-10 (10 = no external scripts)"),
+  thirdPartyDomains: zod
+    .array(zod.string())
+    .describe("List of unique third-party script domains detected"),
+  aiOverlay: zod
+    .object({
+      aiScore: zod
+        .number()
+        .describe("AI-evaluated launch-readiness score 0-100"),
+      confidence: zod.number().describe("Model confidence 0-1"),
+      rationale: zod
+        .string()
+        .describe("One-sentence explanation of the AI score"),
+      riskLabel: zod
+        .string()
+        .describe('\"Low\" | \"Moderate\" | \"High\" | \"Critical\"'),
+      engineUsed: zod
+        .string()
+        .describe('\"deterministic-rules\" | \"local-llm\" | \"none\"'),
+    })
+    .nullish()
+    .describe("AI overlay score (present when LOCAL_AI=true, null otherwise)"),
+  enginesRan: zod
+    .array(zod.string())
+    .describe(
+      "Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai)",
+    ),
   mlOverlay: zod
     .object({
       adjustedGrade: zod

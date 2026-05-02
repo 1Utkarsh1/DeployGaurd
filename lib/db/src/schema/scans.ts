@@ -57,6 +57,17 @@ export const scansTable = pgTable("scans", {
   hasStructuredData: boolean("has_structured_data").notNull().default(false),
   hasNoindex: boolean("has_noindex").notNull().default(false),
   corsScore: real("cors_score").notNull().default(10),
+  structuredDataScore: real("structured_data_score").notNull().default(0),
+  thirdPartyScore: real("third_party_score").notNull().default(10),
+  thirdPartyDomains: jsonb("third_party_domains").notNull().$type<string[]>().default([]),
+  aiOverlay: jsonb("ai_overlay").$type<{
+    aiScore: number;
+    confidence: number;
+    rationale: string;
+    riskLabel: string;
+    engineUsed: string;
+  } | null>(),
+  enginesRan: jsonb("engines_ran").notNull().$type<string[]>().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

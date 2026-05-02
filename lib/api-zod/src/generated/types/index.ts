@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 
+export * from "./aiOverlayResult";
 export * from "./categoryScore";
 export * from "./deleteResponse";
 export * from "./errorResponse";

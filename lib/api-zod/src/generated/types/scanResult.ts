@@ -5,6 +5,7 @@
  * DeployGuard API specification
  * OpenAPI spec version: 0.2.0
  */
+import type { AiOverlayResult } from "./aiOverlayResult";
 import type { CategoryScore } from "./categoryScore";
 import type { MlOverlayResult } from "./mlOverlayResult";
 import type { ScanIssue } from "./scanIssue";
@@ -50,6 +51,16 @@ export interface ScanResult {
   hasStructuredData: boolean;
   /** Whether a meta robots noindex directive was found */
   hasNoindex: boolean;
+  /** Structured data correctness score 0-5 */
+  structuredDataScore: number;
+  /** Third-party governance score 0-10 (10 = no external scripts) */
+  thirdPartyScore: number;
+  /** List of unique third-party script domains detected */
+  thirdPartyDomains: string[];
+  /** AI overlay score (present when LOCAL_AI=true, null otherwise) */
+  aiOverlay?: AiOverlayResult | null;
+  /** Which analysis engines ran (e.g. structured-data, third-party, headless, local-ai) */
+  enginesRan: string[];
   /** Optional ML/rule-based grade adjustment (absent when not computed) */
   mlOverlay?: MlOverlayResult;
   createdAt: string;

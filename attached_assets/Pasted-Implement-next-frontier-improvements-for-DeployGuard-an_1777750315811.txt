@@ -1,0 +1,62 @@
+Implement next frontier improvements for DeployGuard, and add a separate AI overlay score using lightweight local agents/LLM (feature gated, optional).
+
+Requirements:
+Non-negotiables:
+- default scanning remains safe (GET/HEAD)
+- SSRF + rate limiting stay
+- deterministic scoring remains the primary score
+- no external LLM APIs in default path
+
+1) Structured data correctness
+- detect JSON-LD script tags
+- validate basic schema.org JSON-LD structure:
+  - must parse as JSON
+  - must contain @context and @type
+  - warn if @context is missing or not https://schema.org
+  - warn if @type unknown
+  - warn if missing expected properties for common types (Organization, WebSite, Article)
+- add Structured Data score (0-5) and issues list
+- add tests for JSON-LD parsing and failure modes
+
+2) Third-party governance scoring
+- detect third-party scripts/resources by domain:
+  - compute percent of third-party scripts, total scripts
+  - flag domains not in a “known services” whitelist (you can ship a starter whitelist: analytics.google.com, g.doubleclick.net, tagmanager.google.com, static.cloudflareinsights.com, etc.)
+- add Third-party score (0-10)
+- add issues with clear remediation (reduce third-party, trust labels, defer loading)
+
+3) Headless scan module (actual metrics)
+- implement headlessScan(url, options) using Playwright (feature gated via HEADLESS_SCAN=true)
+- Collect metrics:
+  - total resources count
+  - total transfer size
+  - render-blocking scripts/styles count
+  - basic LCP proxy using DOM measurement
+  - accessibility checks via axe-core (if feasible in Replit; otherwise stub gracefully)
+- pipe headless metrics into a Headless score (0-10)
+- add tests for gating behavior and schema (not for Playwright itself)
+
+4) Separate AI overlay score using lightweight local agents/LLM
+- create a new module ai-overlay-score.ts:
+  - takes feature vector + top findings summary
+  - returns aiOverlayScore (0-100), confidence, rationale, and “risk classification” label
+  - must be feature gated via LOCAL_AI=true (off by default)
+- implement strategy:
+  A) default: deterministic ML overlay already exists (keep)
+  B) local LLM mode: load a tiny model via llama.cpp/gguf (or another supported small engine); strictly limit max tokens + runtime
+  - create an “agent prompt” template that ranks top risks and produces a score (must be deterministic as far as possible)
+  - if local model cannot load, fail closed: no overlay score, no crash
+- add tests for the feature flag + output schema
+
+5) UI changes
+- show: Core score (deterministic) + AI overlay score side-by-side
+- show which engines ran (headless, structured data, third-party, local ai)
+
+6) Evaluator scans
+- rerun evaluator scans after implementation:
+  - github.com
+  - news.ycombinator.com
+  - wikipedia.org
+- report Core vs AI overlay scores + top 3 score killers
+
+Start now.

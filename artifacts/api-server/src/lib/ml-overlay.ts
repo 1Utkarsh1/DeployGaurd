@@ -23,6 +23,8 @@ export interface FeatureVector {
   perfScore: number;
   seoScore: number;
   a11yScore: number;
+  thirdPartyScore: number;
+  structuredDataScore: number;
   totalScore: number;
   criticalCount: number;
   warningCount: number;
@@ -147,6 +149,8 @@ export function buildFeatureVector(params: {
   perfScore: number;
   seoScore: number;
   a11yScore: number;
+  thirdPartyScore?: number;
+  structuredDataScore?: number;
   totalScore: number;
   issues: Array<{ severity: string; category: string }>;
   cookieCount: number;
@@ -165,6 +169,8 @@ export function buildFeatureVector(params: {
     perfScore: params.perfScore,
     seoScore: params.seoScore,
     a11yScore: params.a11yScore,
+    thirdPartyScore: params.thirdPartyScore ?? 10,
+    structuredDataScore: params.structuredDataScore ?? 0,
     totalScore: params.totalScore,
     criticalCount: params.issues.filter((i) => i.severity === "critical").length,
     warningCount: params.issues.filter((i) => i.severity === "warning").length,
