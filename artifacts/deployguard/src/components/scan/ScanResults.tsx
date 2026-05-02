@@ -1,8 +1,7 @@
-import type { ScanResult, CategoryScore } from "@workspace/api-client-react/src/generated/api.schemas";
+import type { ScanResult, CategoryScore, ScanIssue } from "@workspace/api-client-react";
 import { ShieldCheck, ShieldAlert, AlertTriangle, Info, CheckCircle2, Copy, FileCode2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -15,9 +14,9 @@ export function ScanResults({ result }: { result: ScanResult }) {
     return "text-destructive";
   };
 
-  const getProgressColor = (score: number) => {
-    if (score >= 80) return "bg-success";
-    if (score >= 60) return "bg-warning";
+  const getBarColor = (pct: number) => {
+    if (pct >= 80) return "bg-success";
+    if (pct >= 60) return "bg-warning";
     return "bg-destructive";
   };
 
@@ -47,12 +46,11 @@ export function ScanResults({ result }: { result: ScanResult }) {
     });
   };
 
-  // Group issues by category
-  const groupedIssues = result.issues.reduce((acc, issue) => {
+  const groupedIssues = result.issues.reduce<Record<string, ScanIssue[]>>((acc, issue) => {
     if (!acc[issue.category]) acc[issue.category] = [];
     acc[issue.category].push(issue);
     return acc;
-  }, {} as Record<string, typeof result.issues>);
+  }, {});
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -93,7 +91,9 @@ export function ScanResults({ result }: { result: ScanResult }) {
           <Card>
             <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full">
               <div className="text-sm text-muted-foreground mb-1">Protocol</div>
-              <div className="text-2xl font-mono font-medium text-success">{result.usesHttps ? 'HTTPS' : 'HTTP'}</div>
+              <div className={`text-2xl font-mono font-medium ${result.usesHttps ? "text-success" : "text-destructive"}`}>
+                {result.usesHttps ? "HTTPS" : "HTTP"}
+              </div>
             </CardContent>
           </Card>
           <Card>
@@ -116,7 +116,12 @@ export function ScanResults({ result }: { result: ScanResult }) {
                   <div className="font-medium">{cat.name}</div>
                   <div className="font-mono text-sm">{cat.score}/{cat.maxScore}</div>
                 </div>
-                <Progress value={percent} className="h-2" indicatorClassName={getProgressColor(percent)} />
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${getBarColor(percent)}`}
+                    style={{ width: `${Math.min(100, percent)}%` }}
+                  />
+                </div>
               </CardContent>
             </Card>
           );
@@ -131,7 +136,7 @@ export function ScanResults({ result }: { result: ScanResult }) {
             <h4 className="text-lg font-semibold text-muted-foreground uppercase tracking-wider">{category}</h4>
             <div className="space-y-3">
               {issues.map((issue, idx) => (
-                <Card key={idx} className={issue.severity === 'critical' ? 'border-destructive/50 bg-destructive/5' : ''}>
+                <Card key={idx} className={issue.severity === "critical" ? "border-destructive/50 bg-destructive/5" : ""}>
                   <CardContent className="p-4 sm:p-5 flex gap-4">
                     <div className="mt-0.5 shrink-0">
                       {getSeverityIcon(issue.severity)}

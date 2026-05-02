@@ -1,4 +1,5 @@
 import { useListScans, useGetScanStats, useDeleteScan, getListScansQueryKey, getGetScanStatsQueryKey } from "@workspace/api-client-react";
+import type { ScanSummary } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -6,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, ExternalLink, Activity } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ScanSummary } from "@workspace/api-client-react/src/generated/api.schemas";
 
 interface HistorySectionProps {
   onSelectScan: (id: number) => void;
@@ -16,7 +16,7 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
   const queryClient = useQueryClient();
   const { data: statsData, isLoading: isLoadingStats } = useGetScanStats();
   const { data: listData, isLoading: isLoadingList } = useListScans();
-  
+
   const deleteScan = useDeleteScan({
     mutation: {
       onSuccess: () => {
@@ -115,8 +115,8 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
               </TableHeader>
               <TableBody>
                 {listData.scans.map((scan: ScanSummary) => (
-                  <TableRow 
-                    key={scan.id} 
+                  <TableRow
+                    key={scan.id}
                     className="cursor-pointer hover:bg-muted/50 group"
                     onClick={() => onSelectScan(scan.id)}
                   >
@@ -136,9 +136,9 @@ export function HistorySection({ onSelectScan }: HistorySectionProps) {
                       {new Date(scan.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={(e) => handleDelete(e, scan.id)}
                         disabled={deleteScan.isPending}

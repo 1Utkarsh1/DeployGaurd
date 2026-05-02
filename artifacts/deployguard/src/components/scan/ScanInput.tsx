@@ -1,13 +1,10 @@
-import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Globe, Loader2, Play } from "lucide-react";
+import { Globe, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
-import { DEMO_SCAN_RESULT } from "@/lib/demo-data";
-import type { ScanResult } from "@workspace/api-client-react/src/generated/api.schemas";
 
 const formSchema = z.object({
   url: z.string().url("Please enter a valid URL (e.g., https://example.com)"),
@@ -15,11 +12,10 @@ const formSchema = z.object({
 
 interface ScanInputProps {
   onScan: (url: string) => void;
-  onDemoMode: (demoData: ScanResult) => void;
   isScanning: boolean;
 }
 
-export function ScanInput({ onScan, onDemoMode, isScanning }: ScanInputProps) {
+export function ScanInput({ onScan, isScanning }: ScanInputProps) {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -29,10 +25,6 @@ export function ScanInput({ onScan, onDemoMode, isScanning }: ScanInputProps) {
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     onScan(values.url);
-  }
-
-  function handleDemo() {
-    onDemoMode(DEMO_SCAN_RESULT);
   }
 
   return (
@@ -80,13 +72,6 @@ export function ScanInput({ onScan, onDemoMode, isScanning }: ScanInputProps) {
           </Button>
         </form>
       </Form>
-      
-      <div className="pt-4">
-        <Button variant="ghost" size="sm" onClick={handleDemo} disabled={isScanning} className="text-muted-foreground">
-          <Play className="mr-2 h-4 w-4" />
-          Try Demo Mode
-        </Button>
-      </div>
     </div>
   );
 }
