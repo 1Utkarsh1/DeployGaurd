@@ -2,16 +2,25 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      retry: 0,
+    },
+  },
+});
 
-// Dark mode toggle component provider equivalent
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    // Force dark mode for devtool aesthetic
     document.documentElement.classList.add("dark");
   }, []);
   return <>{children}</>;
