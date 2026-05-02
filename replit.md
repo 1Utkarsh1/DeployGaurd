@@ -16,7 +16,7 @@ DeployGuard is a launch-readiness dashboard that scans any public URL and return
 - **API codegen**: Orval (contract-first, from OpenAPI spec)
 - **HTML parsing**: `node-html-parser`
 - **Rate limiting**: `express-rate-limit`
-- **Testing**: Vitest (50 unit tests in `artifacts/api-server/src/lib/scanner.test.ts`)
+- **Testing**: Vitest (105 unit tests in `artifacts/api-server/src/lib/scanner.test.ts`)
 
 ## Architecture
 
@@ -31,21 +31,33 @@ lib/
   db/             — Drizzle ORM schema + migrations
 ```
 
-## What DeployGuard checks
+## Scoring Rubric (v2 — 100 pts total)
 
-POST /api/scan fetches the target URL and scores it across 7 categories (total 100 pts):
-
-| Category | Weight | Checks |
+| Category | Max | Key Checks |
 |---|---|---|
-| HTTPS & Redirects | 15 | HTTPS usage, redirect chain length (max 5 hops) |
-| Security Headers | 30 | CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, HSTS |
-| SEO | 20 | Title tag, meta description, viewport, Open Graph |
-| Robots & Sitemap | 10 | robots.txt, sitemap.xml presence |
-| Cookies | 10 | HttpOnly, Secure, SameSite flags |
-| Performance | 10 | Response time, HTML size, external script count |
-| API Exposure | 5 | Publicly accessible /docs, /swagger endpoints |
+| HTTPS & Redirects | 10 | HTTPS usage (8), clean redirect chain ≤2 hops (2) |
+| Security Headers | 35 | CSP quality (12), HSTS quality (9), X-Frame-Options (4), Referrer-Policy (4), Permissions-Policy (4), COOP/COEP/CORP (2) |
+| Cookies & Session | 20 | Per-cookie: Secure (-6), HttpOnly (-3), SameSite (-2), SameSite=None without Secure (-5), overly-broad domain (-2), very long Max-Age (-1) |
+| Cache & Exposure | 10 | Server header version leak (-1), X-Powered-By (-1), CORS wildcard (-3/-4), cache hygiene for cookie-bearing pages (-1), API docs exposed (-2) |
+| Performance | 15 | penaltyCurve curves: response time (free <300ms, max 5pts at 2s), HTML size (free <250KB, max 5pts at 2MB), script count (free <10, max 5pts at 60) |
+| SEO | 7 | Title quality (3), meta description (1.5), viewport (0.5), canonical (0.5), noindex penalty (−0.5), robots.txt (0.5), sitemap (0.5) |
+| Accessibility | 3 | Inputs with accessible labels (1), images with alt (1), main landmark + headings (1) |
 
 Grades: **Excellent** (≥85) / **Good** (≥70) / **Needs Work** (≥50) / **Risky** (<50)
+
+## Deep Analyzer Functions (exported for testing)
+
+- `parseCspDirectives(csp)` — parses CSP string into directive→tokens Map
+- `analyzeCsp(csp)` — quality-scores CSP 0-12 with per-weakness penalties
+- `analyzeHsts(hsts, usesHttps)` — quality-scores HSTS 0-9 (max-age, includeSubDomains, preload)
+- `analyzeCors(allowOrigin, allowCreds)` — detects wildcard CORS and credential misconfig
+- `parseSetCookieHeaders(lines[])` — parses Set-Cookie header lines into ParsedCookie objects
+- `penaltyCurve(value, freeThreshold, maxPenalty, fullPenaltyAt)` — linear penalty interpolation
+- `normalizeUrl`, `isPrivateIp`, `validateSsrfSync` — SSRF protection primitives
+
+## Score Killers
+
+Every scan returns `scoreKillers[]` — top 3 findings sorted by `pointsLost` descending. These are displayed prominently in the UI between the score card and the category breakdown, as labeled numbered items with the category and points lost.
 
 ## Security & Production Hardening
 
@@ -72,11 +84,15 @@ Grades: **Excellent** (≥85) / **Good** (≥70) / **Needs Work** (≥50) / **Ri
 - Concurrency backpressure: max 3 concurrent scans; excess immediately returns 429 + Retry-After: 10
 - Standard RateLimit headers returned (RFC 9110 draft-7)
 
-### Evidence Fields
+## Evidence Fields
+
 Every scan response includes:
-- `htmlHash`: first 16 hex chars of SHA-256 of the fetched HTML body — proves the page was actually retrieved
-- `responseHeadersSnapshot`: subset of response headers actually received (security + diagnostic headers)
-These are stored in the database and displayed in the "Scan Evidence" panel in the UI.
+- `htmlHash`: first 16 hex chars of SHA-256 of the fetched HTML body
+- `responseHeadersSnapshot`: subset of response headers actually received
+- `scoreKillers`: top 3 findings by points lost
+- `canonicalUrl`: canonical link element value (for SEO evidence)
+- `hasStructuredData`: whether JSON-LD was detected
+- `hasNoindex`: whether meta robots noindex was found
 
 ## Key Commands
 
@@ -84,7 +100,7 @@ These are stored in the database and displayed in the "Scan Evidence" panel in t
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run test` — run the 50-test scanner unit test suite
+- `pnpm --filter @workspace/api-server run test` — run the 105-test scanner unit test suite
 
 ## API Endpoints
 
@@ -98,6 +114,6 @@ These are stored in the database and displayed in the "Scan Evidence" panel in t
 
 ## Database Schema
 
-Single table: `scans` — stores all scan results including JSONB columns for flexible data (category scores, issues, cookie issues, redirect chain, security headers, response headers snapshot).
+Single table: `scans` — stores all scan results including JSONB columns for flexible data.
 
-New columns added in production-hardening pass: `html_hash TEXT`, `response_headers_snapshot JSONB`.
+Columns added in v2 upgrade: `score_killers JSONB`, `canonical_url TEXT`, `has_structured_data BOOLEAN`, `has_noindex BOOLEAN`.

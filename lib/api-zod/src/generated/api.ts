@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * DeployGuard API specification
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import * as zod from "zod";
 
@@ -62,14 +62,31 @@ export const CreateScanResponse = zod.object({
   fixPrompt: zod.string(),
   htmlHash: zod
     .string()
-    .describe(
-      "SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved",
-    ),
+    .describe("SHA-256 fingerprint (first 16 hex chars) of the fetched body"),
   responseHeadersSnapshot: zod
     .record(zod.string(), zod.string())
-    .describe(
-      "Subset of response headers actually received (security + diagnostic headers)",
-    ),
+    .describe("Subset of response headers actually received"),
+  scoreKillers: zod
+    .array(
+      zod
+        .object({
+          category: zod.string(),
+          message: zod.string(),
+          pointsLost: zod.number(),
+        })
+        .describe("One of the top score-reducing findings"),
+    )
+    .describe("Top 3 findings by points deducted"),
+  canonicalUrl: zod
+    .string()
+    .nullable()
+    .describe("Value of the canonical link element, if present"),
+  hasStructuredData: zod
+    .boolean()
+    .describe("Whether JSON-LD structured data was detected"),
+  hasNoindex: zod
+    .boolean()
+    .describe("Whether a meta robots noindex directive was found"),
   createdAt: zod.string(),
 });
 
@@ -144,14 +161,31 @@ export const GetScanResponse = zod.object({
   fixPrompt: zod.string(),
   htmlHash: zod
     .string()
-    .describe(
-      "SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved",
-    ),
+    .describe("SHA-256 fingerprint (first 16 hex chars) of the fetched body"),
   responseHeadersSnapshot: zod
     .record(zod.string(), zod.string())
-    .describe(
-      "Subset of response headers actually received (security + diagnostic headers)",
-    ),
+    .describe("Subset of response headers actually received"),
+  scoreKillers: zod
+    .array(
+      zod
+        .object({
+          category: zod.string(),
+          message: zod.string(),
+          pointsLost: zod.number(),
+        })
+        .describe("One of the top score-reducing findings"),
+    )
+    .describe("Top 3 findings by points deducted"),
+  canonicalUrl: zod
+    .string()
+    .nullable()
+    .describe("Value of the canonical link element, if present"),
+  hasStructuredData: zod
+    .boolean()
+    .describe("Whether JSON-LD structured data was detected"),
+  hasNoindex: zod
+    .boolean()
+    .describe("Whether a meta robots noindex directive was found"),
   createdAt: zod.string(),
 });
 

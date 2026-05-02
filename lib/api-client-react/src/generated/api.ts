@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * DeployGuard API specification
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {

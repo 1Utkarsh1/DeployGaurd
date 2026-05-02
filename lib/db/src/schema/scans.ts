@@ -44,12 +44,18 @@ export const scansTable = pgTable("scans", {
     }>
   >(),
   fixPrompt: text("fix_prompt").notNull(),
-  // Evidence fields — prove the fetch happened without exposing full HTML
   htmlHash: text("html_hash").notNull().default(""),
   responseHeadersSnapshot: jsonb("response_headers_snapshot")
     .notNull()
     .$type<Record<string, string>>()
     .default({}),
+  scoreKillers: jsonb("score_killers")
+    .notNull()
+    .$type<Array<{ category: string; message: string; pointsLost: number }>>()
+    .default([]),
+  canonicalUrl: text("canonical_url"),
+  hasStructuredData: boolean("has_structured_data").notNull().default(false),
+  hasNoindex: boolean("has_noindex").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

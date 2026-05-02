@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * DeployGuard API specification
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export * from "./categoryScore";
@@ -22,3 +22,4 @@ export * from "./scanResultSecurityHeaders";
 export * from "./scanStats";
 export * from "./scanStatsGradeCounts";
 export * from "./scanSummary";
+export * from "./scoreKiller";

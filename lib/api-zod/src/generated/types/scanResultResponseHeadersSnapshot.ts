@@ -3,10 +3,10 @@
  * Do not edit manually.
  * Api
  * DeployGuard API specification
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 /**
- * Subset of response headers actually received (security + diagnostic headers)
+ * Subset of response headers actually received
  */
 export type ScanResultResponseHeadersSnapshot = { [key: string]: string };

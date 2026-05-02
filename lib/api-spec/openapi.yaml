@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
+  version: 0.2.0
   description: DeployGuard API specification
 servers:
   - url: /api
@@ -206,6 +206,21 @@ components:
         - maxScore
         - label
 
+    ScoreKiller:
+      type: object
+      description: One of the top score-reducing findings
+      properties:
+        category:
+          type: string
+        message:
+          type: string
+        pointsLost:
+          type: number
+      required:
+        - category
+        - message
+        - pointsLost
+
     ScanResult:
       type: object
       properties:
@@ -268,12 +283,27 @@ components:
           type: string
         htmlHash:
           type: string
-          description: SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved
+          description: SHA-256 fingerprint (first 16 hex chars) of the fetched body
         responseHeadersSnapshot:
           type: object
           additionalProperties:
             type: string
-          description: Subset of response headers actually received (security + diagnostic headers)
+          description: Subset of response headers actually received
+        scoreKillers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoreKiller"
+          description: Top 3 findings by points deducted
+        canonicalUrl:
+          type: string
+          nullable: true
+          description: Value of the canonical link element, if present
+        hasStructuredData:
+          type: boolean
+          description: Whether JSON-LD structured data was detected
+        hasNoindex:
+          type: boolean
+          description: Whether a meta robots noindex directive was found
         createdAt:
           type: string
       required:
@@ -299,6 +329,10 @@ components:
         - fixPrompt
         - htmlHash
         - responseHeadersSnapshot
+        - scoreKillers
+        - canonicalUrl
+        - hasStructuredData
+        - hasNoindex
         - createdAt
 
     ScanSummary:

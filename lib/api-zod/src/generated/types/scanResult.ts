@@ -3,13 +3,14 @@
  * Do not edit manually.
  * Api
  * DeployGuard API specification
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import type { CategoryScore } from "./categoryScore";
 import type { ScanIssue } from "./scanIssue";
 import type { ScanResultGrade } from "./scanResultGrade";
 import type { ScanResultResponseHeadersSnapshot } from "./scanResultResponseHeadersSnapshot";
 import type { ScanResultSecurityHeaders } from "./scanResultSecurityHeaders";
+import type { ScoreKiller } from "./scoreKiller";
 
 export interface ScanResult {
   id: number;
@@ -34,9 +35,17 @@ export interface ScanResult {
   categoryScores: CategoryScore[];
   issues: ScanIssue[];
   fixPrompt: string;
-  /** SHA-256 fingerprint (first 16 hex chars) of the fetched HTML body — evidence the page was actually retrieved */
+  /** SHA-256 fingerprint (first 16 hex chars) of the fetched body */
   htmlHash: string;
-  /** Subset of response headers actually received (security + diagnostic headers) */
+  /** Subset of response headers actually received */
   responseHeadersSnapshot: ScanResultResponseHeadersSnapshot;
+  /** Top 3 findings by points deducted */
+  scoreKillers: ScoreKiller[];
+  /** Value of the canonical link element, if present */
+  canonicalUrl: string | null;
+  /** Whether JSON-LD structured data was detected */
+  hasStructuredData: boolean;
+  /** Whether a meta robots noindex directive was found */
+  hasNoindex: boolean;
   createdAt: string;
 }

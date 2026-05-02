@@ -1,0 +1,90 @@
+You are a senior security + launch-readiness engineer. Upgrade DeployGuard into a deterministic industry-grade scanner that produces scores close to expert judgement (mine) and is explainable.
+
+0) Non-negotiables
+- Safe scanning only: GET/HEAD requests, no auth brute forcing, no form submissions.
+- Strong SSRF protections and rate limiting remain.
+- Output must be deterministic and explainable. Each penalty lists what we observed and why it matters.
+
+1) Deep security quality analyzers
+CSP quality rules:
+- Missing CSP: critical
+- Missing default-src: warning
+- default-src includes * or data: warning
+- script-src contains unsafe-inline or unsafe-eval: warning
+- missing object-src: warning
+- missing or permissive frame-ancestors: warning
+- If CSP uses 'nonce-' or strict-dynamic: bonus
+
+HSTS quality rules:
+- Missing Strict-Transport-Security: critical
+- max-age missing/too small (< 15768000): warning
+- missing includeSubDomains: warning
+- missing preload: minor
+
+Other headers:
+- X-Frame-Options must be DENY/SAMEORIGIN; else warning
+- Referrer-Policy missing or weak (no-referrer-when-downgrade): warning; recommend strict-origin-when-cross-origin
+- Permissions-Policy missing: warning; permissive values reduce score
+- COOP/COEP/CORP missing: warning; recommend strict defaults
+- Cache-Control/Pragma/Expires: check cache hygiene; sensitive sites should discourage caching if cookies set
+- Server header present: warning (info leakage)
+- CORS: warn if Access-Control-Allow-Origin is *, or allows credentials with non-precise origin
+
+2) Cookie/session quality scoring
+Parse Set-Cookie and score each cookie:
+- Secure missing on session cookie: critical
+- SameSite=None without Secure: critical
+- HttpOnly missing on session cookie: warning
+- SameSite missing: warning
+- Domain overly broad (e.g., sets domain=example.com from app.example.com): warning
+- Path missing or too broad: warning
+- Session cookie with very long Max-Age: warning
+
+3) SEO/launch hygiene
+- Canonical tag: missing or wrong host -> warning
+- Meta robots: noindex/nofollow -> warning
+- Structured data: detect if present (JSON-LD script type=application/ld+json)
+- Hreflang sanity if present
+
+4) Accessibility/UX
+Simple HTML heuristics:
+- Inputs without labels (or aria-label) -> warning
+- Images without meaningful alt -> warning
+- Missing main landmark and heading structure -> warning
+
+5) Static performance scoring
+- Page size penalty curve (0 under 250kb; max penalty over 2MB)
+- Scripts penalty curve (penalty starts after 10 scripts; max after 60)
+- Response time penalty curve (0 penalty under 300ms; max after 2s)
+- If caching strong, reduce penalty a bit
+
+6) Scoring rubric total 100
+- HTTPS/Redirects: 10
+- Security headers quality: 35
+- Cookies & session: 20
+- Cache & exposure hygiene: 10
+- Performance: 15
+- SEO: 7
+- Accessibility/UX: 3
+Also output top 3 "score killers" (largest penalties) and a final grade.
+
+7) Evidence upgrades
+Already have hash. Add “penalties list” + “observed headers snapshot” and include script count, page size, and canonical/robots summary.
+
+8) Tests
+Add unit tests for:
+- parseSetCookie
+- CSP weakness detection
+- HSTS completeness checks
+- CORS permissive detection
+- penalty curve math
+
+9) UI
+Remove any demo mode entirely.
+
+10) Evaluation runs
+Scan these 3 sites and output (score + top 3 score killers):
+- https://github.com
+- https://news.ycombinator.com
+- https://wikipedia.org
+Also mention any major discrepancies you see compared to best-practice checklists (OWASP/MDN) and how to tighten the rubric. Do NOT use any LLM runtime.

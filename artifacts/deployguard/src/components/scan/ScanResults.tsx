@@ -1,5 +1,5 @@
 import type { ScanResult, CategoryScore, ScanIssue } from "@workspace/api-client-react";
-import { ShieldAlert, AlertTriangle, Info, CheckCircle2, Copy, FileCode2 } from "lucide-react";
+import { ShieldAlert, AlertTriangle, Info, CheckCircle2, Copy, FileCode2, Flame, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,7 @@ export function ScanResults({ result }: { result: ScanResult }) {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      {/* Top row: Score + Quick Stats */}
       <div className="flex flex-col md:flex-row gap-6 items-start md:items-stretch">
         {/* Score Card */}
         <Card className="w-full md:w-auto shrink-0 bg-card border-card-border overflow-hidden relative">
@@ -135,25 +136,57 @@ export function ScanResults({ result }: { result: ScanResult }) {
           <Card>
             <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full min-h-[90px]">
               <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Scripts</div>
-              <div className={`text-2xl font-mono font-bold ${result.scriptTagCount <= 5 ? "text-success" : result.scriptTagCount <= 15 ? "text-warning" : "text-destructive"}`}>
+              <div className={`text-2xl font-mono font-bold ${result.scriptTagCount <= 10 ? "text-success" : result.scriptTagCount <= 30 ? "text-warning" : "text-destructive"}`}>
                 {result.scriptTagCount}
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4 flex flex-col items-center justify-center text-center h-full min-h-[90px]">
-              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Title</div>
-              <div className="text-sm font-medium truncate w-full" title={result.title ?? undefined}>
-                {result.title ? (
-                  <span className="text-foreground">{result.title}</span>
-                ) : (
-                  <span className="text-destructive">Missing</span>
-                )}
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Noindex</div>
+              <div className={`text-xl font-mono font-bold ${result.hasNoindex ? "text-destructive" : "text-success"}`}>
+                {result.hasNoindex ? "YES ⚠" : "No"}
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Score Killers — Top 3 */}
+      {result.scoreKillers && result.scoreKillers.length > 0 && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Flame className="h-5 w-5 text-destructive" />
+              Top Score Killers
+            </CardTitle>
+            <CardDescription>The three findings costing the most points — fix these first.</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-2">
+              {result.scoreKillers.map((killer, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 p-3 rounded-md bg-card border border-border/60"
+                >
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-destructive/15 text-destructive font-bold text-xs flex items-center justify-center">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-medium leading-tight">{killer.message}</span>
+                      <span className="flex-shrink-0 font-mono text-sm font-bold text-destructive whitespace-nowrap">
+                        −{killer.pointsLost} pts
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{killer.category}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Category Scores */}
       <div>
@@ -183,7 +216,7 @@ export function ScanResults({ result }: { result: ScanResult }) {
         </div>
       </div>
 
-      {/* Issues List */}
+      {/* Detailed Findings */}
       <div className="space-y-6">
         <h3 className="text-xl font-bold border-b border-border/60 pb-3">Detailed Findings</h3>
         {Object.entries(groupedIssues).map(([category, issues]) => (
@@ -227,7 +260,8 @@ export function ScanResults({ result }: { result: ScanResult }) {
       {/* Scan Evidence Panel */}
       <Card className="border-border/40 bg-muted/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+            <TrendingDown className="h-4 w-4" />
             Scan Evidence
           </CardTitle>
           <CardDescription className="text-xs">
@@ -245,12 +279,22 @@ export function ScanResults({ result }: { result: ScanResult }) {
               <dd className="text-foreground/80">{result.statusCode}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground mb-0.5">Body SHA-256 (first 16 chars)</dt>
+              <dt className="text-xs text-muted-foreground mb-0.5">Body SHA-256 (first 16 hex chars)</dt>
               <dd className="text-foreground/80 tracking-widest">{result.htmlHash}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground mb-0.5">Response Time</dt>
               <dd className="text-foreground/80">{Math.round(result.responseTimeMs)} ms</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">Structured Data</dt>
+              <dd className={result.hasStructuredData ? "text-success" : "text-muted-foreground"}>
+                {result.hasStructuredData ? "JSON-LD detected" : "None found"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground mb-0.5">Canonical URL</dt>
+              <dd className="truncate text-foreground/80">{result.canonicalUrl ?? "—"}</dd>
             </div>
             {Object.keys(result.responseHeadersSnapshot).length > 0 && (
               <div className="sm:col-span-2">

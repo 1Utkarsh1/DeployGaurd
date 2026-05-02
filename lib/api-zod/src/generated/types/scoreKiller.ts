@@ -5,12 +5,12 @@
  * DeployGuard API specification
  * OpenAPI spec version: 0.2.0
  */
-import type { ScanIssueSeverity } from "./scanIssueSeverity";
 
-export interface ScanIssue {
+/**
+ * One of the top score-reducing findings
+ */
+export interface ScoreKiller {
   category: string;
-  severity: ScanIssueSeverity;
   message: string;
-  explanation: string;
-  suggestion: string;
+  pointsLost: number;
 }

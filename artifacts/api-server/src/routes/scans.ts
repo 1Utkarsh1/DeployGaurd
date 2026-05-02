@@ -17,8 +17,6 @@ import { scanRateLimiter } from "../middlewares/rateLimiter";
 
 const router: IRouter = Router();
 
-// Max concurrent scans — each scan makes multiple outbound HTTP requests.
-// Beyond this threshold we return 429 immediately rather than queuing.
 let activeScanCount = 0;
 const MAX_CONCURRENT_SCANS = 3;
 
@@ -39,7 +37,6 @@ router.post("/scan", scanRateLimiter, async (req, res): Promise<void> => {
   }
 
   const { url } = parsed.data;
-
   activeScanCount++;
   let result;
   try {
@@ -79,6 +76,10 @@ router.post("/scan", scanRateLimiter, async (req, res): Promise<void> => {
       fixPrompt: result.fixPrompt,
       htmlHash: result.htmlHash,
       responseHeadersSnapshot: result.responseHeadersSnapshot,
+      scoreKillers: result.scoreKillers,
+      canonicalUrl: result.canonicalUrl ?? null,
+      hasStructuredData: result.hasStructuredData,
+      hasNoindex: result.hasNoindex,
     })
     .returning();
 
@@ -121,9 +122,7 @@ router.get("/scans", async (req, res): Promise<void> => {
 
 router.get("/scans/stats", async (req, res): Promise<void> => {
   const [allScans, recentScans] = await Promise.all([
-    db
-      .select({ score: scansTable.score, grade: scansTable.grade })
-      .from(scansTable),
+    db.select({ score: scansTable.score, grade: scansTable.grade }).from(scansTable),
     db
       .select({
         id: scansTable.id,
@@ -173,12 +172,7 @@ router.get("/scans/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(
-    GetScanResponse.parse({
-      ...scan,
-      createdAt: scan.createdAt.toISOString(),
-    }),
-  );
+  res.json(GetScanResponse.parse({ ...scan, createdAt: scan.createdAt.toISOString() }));
 });
 
 router.delete("/scans/:id", async (req, res): Promise<void> => {
