@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- Logo Banner -->
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=40&pause=1000&color=6366F1&center=true&vCenter=true&width=600&height=80&lines=🛡️+DeployGuard;Launch+with+Confidence!" alt="DeployGuard" />
+<img src="https://github.com/user-attachments/assets/dcc5ff62-d811-4a02-9d13-6b6654b538c7" alt="DeployGuard" width="300" />
 
 <br/>
 
